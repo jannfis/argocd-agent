@@ -1,0 +1,11 @@
+version: v1
+managed:
+  enabled: true
+
+plugins:
+  - name: gateway-client
+    path: protoc-gen-grpc-gateway-client
+    out: pkg/api/gen
+    opt:
+      - paths=source_relative
+
