@@ -3,9 +3,12 @@ managed:
   enabled: true
 
 plugins:
+  - plugin: go
+    out: api/gen
+    opt: paths=source_relative
   - name: gateway-client
     path: protoc-gen-grpc-gateway-client
-    out: pkg/api/gen
+    out: api/gen
     opt:
       - paths=source_relative
 

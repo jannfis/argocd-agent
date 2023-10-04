@@ -1,0 +1,26 @@
+syntax = "proto3";
+option go_package = "github.com/jannfis/argocd-application-agent/pkg/api/auth/authapi";
+
+package authapi;
+
+import "google/api/annotations.proto";
+
+message AuthRequest {
+    string username = 1;
+    string password = 2;
+    string agentName = 3;
+}
+
+message AuthResponse {
+    string result = 1;
+    string token = 2;
+}
+
+service Authentication {
+    rpc Authenticate(AuthRequest) returns (AuthResponse) {
+        option (google.api.http) = {
+            post: "/api/v1/authenticate"
+            body: "auth"
+        };
+    }
+}
