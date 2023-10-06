@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/jannfis/argocd-application-agent/internal/version"
-	versionapi "github.com/jannfis/argocd-application-agent/pkg/api/grpc/version"
+	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/versionapi"
 	"github.com/stretchr/testify/assert"
 )
 

@@ -4,7 +4,7 @@
 // - protoc             v3.17.3
 // source: version.proto
 
-package version
+package versionapi
 
 import (
 	context "context"

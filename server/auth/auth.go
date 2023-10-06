@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/jannfis/argocd-application-agent/internal/auth"
-	authapi "github.com/jannfis/argocd-application-agent/pkg/api/grpc/auth"
+	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/authapi"
 	"github.com/jannfis/argocd-application-agent/pkg/types"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

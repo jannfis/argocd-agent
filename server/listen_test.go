@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jannfis/argocd-application-agent/internal/version"
-	versionapi "github.com/jannfis/argocd-application-agent/pkg/api/grpc/version"
+	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/versionapi"
 	fakecerts "github.com/jannfis/argocd-application-agent/test/fake/certs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

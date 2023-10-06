@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+option go_package = "github.com/jannfis/argocd-application-agent/pkg/api/grpc/appstreamapi";
+
+package appstreamapi;
+
+import "google/api/annotations.proto";
+
+message Subscription {
+    repeated string namespaces = 1;
+}
+
+message SubscriptionStream {
+    string appName = 1;
+}
+
+service AppStream {
+    rpc Subscribe(Subscription) returns (SubscriptionStream) {
+        option (google.api.http).get = "/api/v1/appstream";
+    }
+}

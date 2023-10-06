@@ -14,8 +14,8 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	authapi "github.com/jannfis/argocd-application-agent/pkg/api/grpc/auth"
-	versionapi "github.com/jannfis/argocd-application-agent/pkg/api/grpc/version"
+	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/authapi"
+	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/versionapi"
 	"github.com/jannfis/argocd-application-agent/server/auth"
 	"github.com/jannfis/argocd-application-agent/server/version"
 	log "github.com/sirupsen/logrus"
