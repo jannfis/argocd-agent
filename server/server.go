@@ -8,16 +8,18 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jannfis/argocd-application-agent/internal/auth"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
 
 type Server struct {
-	options    *ServerOptions
-	tlsConfig  *tls.Config
-	listener   *Listener
-	server     *http.Server
-	grpcServer *grpc.Server
+	options     *ServerOptions
+	tlsConfig   *tls.Config
+	listener    *Listener
+	server      *http.Server
+	grpcServer  *grpc.Server
+	authMethods *auth.Methods
 }
 
 func NewServer(opts ...ServerOption) (*Server, error) {
@@ -28,17 +30,11 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 			return nil, err
 		}
 	}
-	s := &Server{options: options}
-	return s, nil
-}
-
-func (s *Server) Run() error {
-	tlsConfig, err := s.loadTLSConfig()
-	if err != nil {
-		return err
+	s := &Server{
+		options:     options,
+		authMethods: auth.NewMethods(),
 	}
-	s.tlsConfig = tlsConfig
-	return nil
+	return s, nil
 }
 
 func (s *Server) Stop() error {
@@ -56,6 +52,7 @@ func (s *Server) Stop() error {
 		s.server = nil
 	} else if s.grpcServer != nil {
 		s.grpcServer.Stop()
+		s.grpcServer = nil
 	} else {
 		return fmt.Errorf("no server running")
 	}

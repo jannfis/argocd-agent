@@ -1,14 +1,15 @@
 syntax = "proto3";
-option go_package = "github.com/jannfis/argocd-application-agent/pkg/api/auth/authapi";
+option go_package = "github.com/jannfis/argocd-application-agent/pkg/api/grpc/auth";
 
 package authapi;
 
 import "google/api/annotations.proto";
 
 message AuthRequest {
-    string username = 1;
-    string password = 2;
-    string agentName = 3;
+    // Method specifies the type of authentication to use. The value is implementation specific.
+    string method = 1;
+    // Credentials specifies the credentials to use for authentication in a key/value fashion.
+    map<string,string> credentials = 2;
 }
 
 message AuthResponse {

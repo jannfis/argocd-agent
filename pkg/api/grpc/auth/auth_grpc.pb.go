@@ -4,7 +4,7 @@
 // - protoc             v3.17.3
 // source: auth.proto
 
-package authapi
+package auth
 
 import (
 	context "context"

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -44,4 +45,8 @@ func Test_ProcessChange(t *testing.T) {
 		})
 		assert.False(t, fc.ProcessChange(app, app))
 	})
+}
+
+func init() {
+	logrus.SetLevel(logrus.TraceLevel)
 }

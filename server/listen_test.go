@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	authapi "github.com/jannfis/argocd-application-agent/pkg/api/grpc/auth"
+	"github.com/jannfis/argocd-application-agent/internal/version"
+	versionapi "github.com/jannfis/argocd-application-agent/pkg/api/grpc/version"
 	fakecerts "github.com/jannfis/argocd-application-agent/test/fake/certs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -114,10 +115,10 @@ func Test_Serve(t *testing.T) {
 				grpc.WithTransportCredentials(creds))
 			require.NoError(t, err)
 			defer conn.Close()
-			client := authapi.NewAuthenticationClient(conn)
-			r, err := client.Authenticate(context.Background(), &authapi.AuthRequest{})
+			client := versionapi.NewVersionClient(conn)
+			r, err := client.Version(context.Background(), &versionapi.VersionRequest{})
 			require.NoError(t, err)
-			assert.Equal(t, r.Result, "ok")
+			assert.Equal(t, r.Version, version.QualifiedVersion())
 			s.Stop()
 			ticker.Stop()
 		case <-timeout.C:

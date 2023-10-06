@@ -2,6 +2,7 @@ package filter
 
 import (
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/sirupsen/logrus"
 )
 
 // ChangeFilterFunc is a function that compares old and new and returns false if the
@@ -34,6 +35,7 @@ func (fc *Chain) AppendAdmitFilter(f AdmitFilterFunc) {
 func (fc *Chain) ProcessChange(old, new *v1alpha1.Application) bool {
 	for _, f := range fc.changeFilters {
 		if !f(old, new) {
+			log().WithField("application", new.QualifiedName()).Tracef("Process filter negative")
 			return false
 		}
 	}
@@ -45,6 +47,7 @@ func (fc *Chain) ProcessChange(old, new *v1alpha1.Application) bool {
 func (fc *Chain) Admit(app *v1alpha1.Application) bool {
 	for _, f := range fc.admitFilters {
 		if !f(app) {
+			log().WithField("application", app.QualifiedName()).Tracef("Admit filter negative")
 			return false
 		}
 	}
@@ -55,4 +58,8 @@ func (fc *Chain) Admit(app *v1alpha1.Application) bool {
 func NewFilterChain() *Chain {
 	fc := &Chain{}
 	return fc
+}
+
+func log() *logrus.Entry {
+	return logrus.WithField("module", "filter")
 }

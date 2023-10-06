@@ -15,7 +15,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	authapi "github.com/jannfis/argocd-application-agent/pkg/api/grpc/auth"
+	versionapi "github.com/jannfis/argocd-application-agent/pkg/api/grpc/version"
 	"github.com/jannfis/argocd-application-agent/server/auth"
+	"github.com/jannfis/argocd-application-agent/server/version"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -111,7 +113,8 @@ func (s *Server) ServeGRPC(ctx context.Context, errch chan error) error {
 	}
 	s.grpcServer = grpc.NewServer()
 
-	authapi.RegisterAuthenticationServer(s.grpcServer, auth.NewAuthServer())
+	authapi.RegisterAuthenticationServer(s.grpcServer, auth.NewServer(s.authMethods))
+	versionapi.RegisterVersionServer(s.grpcServer, version.NewServer())
 	go func() {
 		err = s.grpcServer.Serve(s.listener.l)
 		errch <- err
