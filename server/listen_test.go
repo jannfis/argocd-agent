@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
 	"github.com/jannfis/argocd-application-agent/internal/version"
 	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/versionapi"
 	fakecerts "github.com/jannfis/argocd-application-agent/test/fake/certs"
@@ -61,7 +62,7 @@ func Test_Listen(t *testing.T) {
 	templ := certTempl
 	fakecerts.WriteFakeRSAKeyPair(t, path.Join(tempDir, "test-cert"), templ)
 	t.Run("Auto-select port for listener", func(t *testing.T) {
-		s, err := NewServer(
+		s, err := NewServer(fakeappclient.NewSimpleClientset(), testNamespace,
 			WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 			WithListenerPort(0),
 			WithListenerAddress("127.0.0.1"),
@@ -75,7 +76,7 @@ func Test_Listen(t *testing.T) {
 	})
 
 	t.Run("Listen on privileged port", func(t *testing.T) {
-		s, err := NewServer(
+		s, err := NewServer(fakeappclient.NewSimpleClientset(), testNamespace,
 			WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 			WithListenerPort(443),
 			WithListenerAddress("127.0.0.1"),
@@ -92,11 +93,11 @@ func Test_Serve(t *testing.T) {
 	tempDir := t.TempDir()
 	templ := certTempl
 	fakecerts.WriteFakeRSAKeyPair(t, path.Join(tempDir, "test-cert"), templ)
-	s, err := NewServer(
+	s, err := NewServer(fakeappclient.NewSimpleClientset(), testNamespace,
 		WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 		WithListenerPort(0),
 		WithListenerAddress("127.0.0.1"),
-		WithGracePeriod(2*time.Second),
+		WithShutDownGracePeriod(2*time.Second),
 	)
 	require.NoError(t, err)
 	errch := make(chan error)

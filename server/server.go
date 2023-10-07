@@ -8,9 +8,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
+	"github.com/jannfis/argocd-application-agent/internal/appinformer"
 	"github.com/jannfis/argocd-application-agent/internal/auth"
 	"github.com/jannfis/argocd-application-agent/internal/queue"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
 
@@ -22,9 +25,11 @@ type Server struct {
 	grpcServer  *grpc.Server
 	authMethods *auth.Methods
 	queues      *queue.SendRecvQueues
+	informer    *appinformer.AppInformer
+	namespace   string
 }
 
-func NewServer(opts ...ServerOption) (*Server, error) {
+func NewServer(appClient appclientset.Interface, namespace string, opts ...ServerOption) (*Server, error) {
 	options := defaultOptions()
 	for _, o := range opts {
 		err := o(options)
@@ -36,8 +41,36 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 		options:     options,
 		authMethods: auth.NewMethods(),
 		queues:      queue.NewSendRecvQueues(),
+		namespace:   namespace,
 	}
+
+	s.informer = appinformer.NewAppInformer(appClient,
+		s.namespace,
+		appinformer.WithNamespaces(options.namespaces...),
+		appinformer.WithNewAppCallback(s.newAppCallback),
+	)
+
 	return s, nil
+}
+
+func (s *Server) newAppCallback(app *v1alpha1.Application) {
+	logCtx := log().WithField("component", "NewAppCallback")
+	if !s.queues.HasQueuePair(app.Namespace) {
+		logCtx.Debugf("Creating new queue pair for namespace %s", app.Namespace)
+		err := s.queues.Create(app.Namespace)
+		if err != nil {
+			logCtx.Errorf("could not create new queue pair for namespace %s: %v", app.Namespace, err)
+			return
+		}
+	}
+	q := s.queues.SendQ(app.Namespace)
+	if q == nil {
+		logCtx.Errorf("Help! queue pair for namespace %s disappeared!", app.Namespace)
+		return
+	}
+
+	q.Add(app)
+	logCtx.Tracef("Added app %s to send queue, total length now %d", app.QualifiedName(), q.Len())
 }
 
 func (s *Server) Stop() error {
@@ -46,14 +79,15 @@ func (s *Server) Stop() error {
 		if s.options.gracePeriod > 0 {
 			ctx, cancel := context.WithTimeout(context.Background(), s.options.gracePeriod)
 			defer cancel()
-			log.Infof("Server shutdown requested, allowing client connections to shut down for %v", s.options.gracePeriod)
+			log().Infof("Server shutdown requested, allowing client connections to shut down for %v", s.options.gracePeriod)
 			err = s.server.Shutdown(ctx)
 		} else {
-			log.Infof("Closing server")
+			log().Infof("Closing server")
 			err = s.server.Close()
 		}
 		s.server = nil
 	} else if s.grpcServer != nil {
+		log().Infof("Shutting down server")
 		s.grpcServer.Stop()
 		s.grpcServer = nil
 	} else {
@@ -73,11 +107,15 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 			return nil, fmt.Errorf("could not parse certificate from %s: %w", s.options.tlsCert, err)
 		}
 		if !cert.NotAfter.After(time.Now()) {
-			log.Warnf("Server certificate has expired on %s", cert.NotAfter.Format(time.RFC1123Z))
+			log().Warnf("Server certificate has expired on %s", cert.NotAfter.Format(time.RFC1123Z))
 		}
 	}
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 	}
 	return tlsConfig, nil
+}
+
+func log() *logrus.Entry {
+	return logrus.WithField("module", "server")
 }

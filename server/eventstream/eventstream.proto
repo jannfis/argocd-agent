@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+option go_package = "github.com/jannfis/argocd-application-agent/pkg/api/grpc/eventstreamapi";
+
+package eventstreamapi;
+
+import "google/api/annotations.proto";
+
+// The following imports require dependencies to be vendored in
+import "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1/generated.proto";
+
+enum EventType {
+    Event_Unspecified = 0;
+    Event_Add = 1;
+    Event_Update = 2;
+    Event_Delete = 3;
+}
+
+message Event {
+    EventType event = 1;
+    github.com.argoproj.argo_cd.v2.pkg.apis.application.v1alpha1.Application application = 2;
+}
+
+message PushSummary {
+    string result = 1;
+}
+
+service EventStream {
+    rpc Subscribe(stream Event) returns (stream Event) {
+        option (google.api.http).get = "/api/v1/appstream";
+    }
+
+    rpc Push(stream Event) returns (PushSummary) {
+        option (google.api.http).get = "/api/v1/push";
+    }
+}

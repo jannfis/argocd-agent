@@ -9,35 +9,38 @@ import (
 	"time"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/appstreamapi"
+	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
+	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/eventstreamapi"
 	fakecerts "github.com/jannfis/argocd-application-agent/test/fake/certs"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func newStreamingClient(t *testing.T, s *Server) (appstreamapi.AppStreamClient, *grpc.ClientConn) {
+func newStreamingClient(t *testing.T, s *Server) (eventstreamapi.EventStreamClient, *grpc.ClientConn) {
 	t.Helper()
 	tlsC := &tls.Config{InsecureSkipVerify: true}
 	creds := credentials.NewTLS(tlsC)
 	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", s.listener.host, s.listener.port),
 		grpc.WithTransportCredentials(creds))
 	require.NoError(t, err)
-	return appstreamapi.NewAppStreamClient(conn), conn
-
+	return eventstreamapi.NewEventStreamClient(conn), conn
 }
 
 func Test_EndToEnd(t *testing.T) {
 	tempDir := t.TempDir()
 	templ := certTempl
 	fakecerts.WriteFakeRSAKeyPair(t, path.Join(tempDir, "test-cert"), templ)
-	s, err := NewServer(
+	appC := fakeappclient.NewSimpleClientset()
+
+	s, err := NewServer(appC, testNamespace,
 		WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 		WithListenerPort(0),
 		WithListenerAddress("127.0.0.1"),
-		WithGracePeriod(2*time.Second),
+		WithShutDownGracePeriod(2*time.Second),
 	)
 	require.NoError(t, err)
 	errch := make(chan error)
@@ -45,10 +48,10 @@ func Test_EndToEnd(t *testing.T) {
 	assert.NoError(t, err)
 	// ticker := time.NewTicker(500 * time.Millisecond)
 	// timeout := time.NewTicker(2 * time.Second)
-	agentName := "testagent"
-	if !s.queues.HasQueuePair(agentName) {
-		s.queues.Create(agentName)
-	}
+	// agentName := "testagent"
+	// if !s.queues.HasQueuePair(agentName) {
+	// 	s.queues.Create(agentName)
+	// }
 
 	client, conn := newStreamingClient(t, s)
 	defer conn.Close()
@@ -58,27 +61,35 @@ func Test_EndToEnd(t *testing.T) {
 	require.NotNil(t, sub)
 	require.NoError(t, err)
 	waitc := make(chan struct{})
-	running := true
-	appsSent := 0
-	for running {
+	serverRunning := true
+	appsCreated := 0
+	for serverRunning {
 		select {
-		// case <-ctx.Done():
-		// 	logrus.Infof("Canceled")
-		// 	running = false
 		case <-sub.Context().Done():
 			logrus.Infof("Done")
 			sub.CloseSend()
-			running = false
+			s.Stop()
+			serverRunning = false
 		case <-waitc:
 			sub.CloseSend()
-			running = false
+			serverRunning = false
 		default:
-			if appsSent < 5 {
-				sub.Send(&appstreamapi.Subscription{Application: &v1alpha1.Application{}})
-				appsSent += 1
+			if appsCreated > 4 {
+				continue
 			}
+			time.Sleep(100 * time.Millisecond)
+			_, err := appC.ArgoprojV1alpha1().Applications(testNamespace).Create(context.TODO(), &v1alpha1.Application{
+				ObjectMeta: v1.ObjectMeta{
+					Name:      fmt.Sprintf("app%d", appsCreated+1),
+					Namespace: testNamespace,
+				},
+			}, v1.CreateOptions{})
+			require.NoError(t, err)
+			appsCreated += 1
 		}
 	}
+
+	appC.ArgoprojV1alpha1().Applications("")
 	// select {
 	// case <-ticker.C:
 	// 	r, err := client.Version(context.Background(), &versionapi.VersionRequest{})

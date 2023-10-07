@@ -5,8 +5,8 @@ set -eo pipefail
 PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE}")"/..; pwd)
 
 GENERATE_PATHS="
-	${PROJECT_ROOT}/server/appstream;appstreamapi
 	${PROJECT_ROOT}/server/auth;authapi
+	${PROJECT_ROOT}/server/eventstream;eventstreamapi
 	${PROJECT_ROOT}/server/version;versionapi
 "
 

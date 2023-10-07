@@ -2,6 +2,7 @@ package appinformer
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
@@ -36,18 +37,30 @@ type AppInformer struct {
 // ListAppsCallback is executed when the informer builds its cache. It receives
 // all apps matching the configured label selector and must returned a list of
 // apps to keep in the cache.
+//
+// Callbacks are executed after the AppInformer validated that the application
+// is good for processing.
 type ListAppsCallback func(apps []v1alpha1.Application) []v1alpha1.Application
 
 // NewAppCallback is executed when a new app is determined by the underlying
 // watcher.
+//
+// Callbacks are executed after the AppInformer validated that the application
+// is allowed for processing.
 type NewAppCallback func(app *v1alpha1.Application)
 
 // UpdateAppCallback is executed when a change event for an app is determined
 // by the underlying watcher.
+//
+// Callbacks are executed after the AppInformer validated that the application
+// is allowed for processing.
 type UpdateAppCallback func(old *v1alpha1.Application, new *v1alpha1.Application)
 
 // DeleteAppCallback is executed when an app delete event is determined by the
 // underlying watcher.
+//
+// Callbacks are executed after the AppInformer validated that the application
+// is allowed for processing.
 type DeleteAppCallback func(app *v1alpha1.Application)
 
 // ErrorCallback is executed when the watcher events encounter an error
@@ -121,6 +134,8 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 	i.Informer.AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
+				logCtx := log().WithField("component", "AddFunc")
+				logCtx.Tracef("New application event")
 				app, ok := obj.(*v1alpha1.Application)
 				if !ok || app == nil {
 					// if i.options.errorCb != nil {
@@ -139,9 +154,10 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 				}
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
+				logCtx := log().WithField("component", "UpdateFunc")
+				logCtx.Tracef("Application update event")
 				newApp, newOk := newObj.(*v1alpha1.Application)
 				oldApp, oldOk := oldObj.(*v1alpha1.Application)
-				logCtx := log().WithField("component", "UpdateFunc")
 				if !newOk || !oldOk {
 					// if i.options.errorCb != nil {
 					// 	i.options.errorCb(nil, "invalid resource received by update event")
@@ -174,6 +190,8 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 				}
 			},
 			DeleteFunc: func(obj interface{}) {
+				logCtx := log().WithField("component", "DeleteFunc")
+				logCtx.Tracef("Application update event")
 				app, ok := obj.(*v1alpha1.Application)
 				if !ok || app == nil {
 					// if i.options.errorCb != nil {
@@ -181,7 +199,7 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 					// }
 					return
 				}
-				logCtx := log().WithField("component", "DeleteFunc").WithField("application", app.QualifiedName())
+				logCtx = logCtx.WithField("application", app.QualifiedName())
 				if !i.isAppAllowed(app) {
 					logCtx.Tracef("Ignoring application delete event")
 					return
@@ -198,6 +216,11 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 	i.Lister = applisters.NewApplicationLister(i.Informer.GetIndexer())
 	i.Informer.SetWatchErrorHandler(cache.DefaultWatchErrorHandler)
 	return i
+}
+
+func (i *AppInformer) Start(stopch <-chan struct{}) {
+	log().Infof("Starting app informer (namespaces: %s)", strings.Join(append([]string{i.options.namespace}, i.options.namespaces...), ","))
+	i.Informer.Run(stopch)
 }
 
 // isAppAllowed returns true if the app is allowed to be processed

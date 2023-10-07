@@ -1,18 +1,18 @@
-package appstream
+package eventstream
 
 import (
 	"io"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/jannfis/argocd-application-agent/internal/queue"
-	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/appstreamapi"
+	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 type server struct {
-	appstreamapi.UnimplementedAppStreamServer
+	eventstreamapi.UnimplementedEventStreamServer
 
 	options *ServerOptions
 	queues  *queue.SendRecvQueues
@@ -59,11 +59,13 @@ func NewServer(queues *queue.SendRecvQueues, opts ...ServerOption) *server {
 //
 // The connection is kept open until the agent closes it, and the stream tries
 // to send updates to the agent as long as possible.
-func (s *server) Subscribe(sc appstreamapi.AppStream_SubscribeServer) error {
+func (s *server) Subscribe(sc eventstreamapi.EventStream_SubscribeServer) error {
 	waitc := make(chan struct{})
 	logCtx := log().WithField("method", "Subscribe")
 
-	agentName := "testagent"
+	agentName := "default"
+	v := sc.Context().Value("agent_name")
+	logCtx.Debugf("Agent name: %v", v)
 
 	// Recv() is blocking, so we run the receiver part in its own go routine
 	go func() {
@@ -121,7 +123,7 @@ func (s *server) Subscribe(sc appstreamapi.AppStream_SubscribeServer) error {
 					logCtx.Warnf("invalid data in sendqueue")
 					continue
 				}
-				err := sc.Send(&appstreamapi.Subscription{Application: app.DeepCopy()})
+				err := sc.Send(&eventstreamapi.Event{Application: app.DeepCopy()})
 				// TODO: How to handle errors on send?
 				if err != nil {
 					logCtx.Errorf("Error sending data: %v", err)
@@ -137,7 +139,7 @@ func (s *server) Subscribe(sc appstreamapi.AppStream_SubscribeServer) error {
 
 // Push implements a client-side stream to receive updates for the client's
 // Application resources.
-func (s *server) Push(sub appstreamapi.AppStream_PushServer) error {
+func (s *server) Push(sub eventstreamapi.EventStream_PushServer) error {
 	return nil
 }
 

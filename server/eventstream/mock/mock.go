@@ -1,23 +1,24 @@
 package mock
 
 import (
+	"context"
 	"sync/atomic"
 	"time"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/appstreamapi"
+	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/eventstreamapi"
 	"google.golang.org/grpc"
 )
 
 // SendHook is a function that will be executed for the Send call in the mock
-type SendHook func(s *MockSubscriptionServer, sub *appstreamapi.Subscription) error
+type SendHook func(s *MockEventServer, sub *eventstreamapi.Event) error
 
-// SendHook is a function that will be executed for the Recv call in the mock
-type RecvHook func(s *MockSubscriptionServer) error
+// RecvHook is a function that will be executed for the Recv call in the mock
+type RecvHook func(s *MockEventServer) error
 
-// MockSubscriptionServer implements a mock for the SubscriptionServer stream
+// MockEventServer implements a mock for the SubscriptionServer stream
 // used for testing.
-type MockSubscriptionServer struct {
+type MockEventServer struct {
 	grpc.ServerStream
 
 	NumSent     atomic.Uint32
@@ -32,15 +33,19 @@ type MockSubscriptionServer struct {
 	SendHooks   []SendHook
 }
 
-func (s *MockSubscriptionServer) AddSendHook(hook SendHook) {
+func (s *MockEventServer) AddSendHook(hook SendHook) {
 	s.SendHooks = append(s.SendHooks, hook)
 }
 
-func (s *MockSubscriptionServer) AddRecvHook(hook RecvHook) {
+func (s *MockEventServer) AddRecvHook(hook RecvHook) {
 	s.RecvHooks = append(s.RecvHooks, hook)
 }
 
-func (s *MockSubscriptionServer) Send(sub *appstreamapi.Subscription) error {
+func (s *MockEventServer) Context() context.Context {
+	return context.WithValue(context.TODO(), "agent_name", "default")
+}
+
+func (s *MockEventServer) Send(sub *eventstreamapi.Event) error {
 	var err error
 	for _, h := range s.SendHooks {
 		if err = h(s, sub); err != nil {
@@ -53,7 +58,7 @@ func (s *MockSubscriptionServer) Send(sub *appstreamapi.Subscription) error {
 	return err
 }
 
-func (s *MockSubscriptionServer) Recv() (*appstreamapi.Subscription, error) {
+func (s *MockEventServer) Recv() (*eventstreamapi.Event, error) {
 	var err error
 	for _, h := range s.RecvHooks {
 		if err = h(s); err != nil {
@@ -62,7 +67,7 @@ func (s *MockSubscriptionServer) Recv() (*appstreamapi.Subscription, error) {
 	}
 	if err == nil {
 		s.NumRecv.Add(1)
-		return &appstreamapi.Subscription{Application: s.Application.DeepCopy()}, nil
+		return &eventstreamapi.Event{Application: s.Application.DeepCopy()}, nil
 	}
 
 	return nil, err

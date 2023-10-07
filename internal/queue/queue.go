@@ -68,8 +68,8 @@ func (q *SendRecvQueues) RecvQ(name string) workqueue.RateLimitingInterface {
 // list of available queues. The given name must be unique, if a queue pair
 // with the same name already exists, Create will return an error.
 func (q *SendRecvQueues) Create(name string) error {
-	q.queuelock.RLock()
-	defer q.queuelock.RUnlock()
+	q.queuelock.Lock()
+	defer q.queuelock.Unlock()
 	_, ok := q.queues[name]
 	if ok {
 		return fmt.Errorf("cannot initialize queue for %s: queue already exists", name)

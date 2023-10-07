@@ -12,13 +12,12 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/appstreamapi"
 	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/authapi"
+	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/versionapi"
-	"github.com/jannfis/argocd-application-agent/server/appstream"
 	"github.com/jannfis/argocd-application-agent/server/auth"
+	"github.com/jannfis/argocd-application-agent/server/eventstream"
 	"github.com/jannfis/argocd-application-agent/server/version"
-	log "github.com/sirupsen/logrus"
 )
 
 const listenerRetries = 5
@@ -79,11 +78,11 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 	err = wait.ExponentialBackoff(backoff, func() (done bool, err error) {
 		var lerr error
 		if try == 1 {
-			log.Debugf("Starting TCP listener on %s", bind)
+			log().Debugf("Starting TCP listener on %s", bind)
 		}
 		c, lerr = tls.Listen("tcp", bind, s.tlsConfig)
 		if lerr != nil {
-			log.WithError(err).Debugf("Retrying to start TCP listener on %s (retry %d/%d)", bind, try, listenerRetries)
+			log().WithError(err).Debugf("Retrying to start TCP listener on %s (retry %d/%d)", bind, try, listenerRetries)
 			try += 1
 			return false, lerr
 		}
@@ -94,7 +93,7 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 		return err
 	}
 
-	log.Infof("Now listening on %s", c.Addr().String())
+	log().Infof("Now listening on %s", c.Addr().String())
 	s.listener, err = addrToListener(c)
 	if err == nil {
 		if ctx == nil {
@@ -115,12 +114,22 @@ func (s *Server) ServeGRPC(ctx context.Context, errch chan error) error {
 
 	authapi.RegisterAuthenticationServer(s.grpcServer, auth.NewServer(s.authMethods))
 	versionapi.RegisterVersionServer(s.grpcServer, version.NewServer())
-	appstreamapi.RegisterAppStreamServer(s.grpcServer, appstream.NewServer(s.queues))
+	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues))
+	stopch := make(chan struct{})
+
+	// The gRPC server lives in its own go routine
 	go func() {
 		err = s.grpcServer.Serve(s.listener.l)
+		close(stopch)
 		errch <- err
 	}()
 
+	// The application informer lives in its own go routine
+	if s.informer != nil {
+		go func() {
+			s.informer.Start(stopch)
+		}()
+	}
 	return nil
 }
 

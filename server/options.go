@@ -21,6 +21,7 @@ type ServerOptions struct {
 	tlsCiphers    *tls.CipherSuite
 	tlsMinVersion int
 	gracePeriod   time.Duration
+	namespaces    []string
 }
 
 type ServerOption func(o *ServerOptions) error
@@ -95,12 +96,19 @@ func WithMinimumTLSVersion(version string) ServerOption {
 	}
 }
 
-// WithGracePeriod configures how long the server should wait for connections
-// to close during shutdown. If d is 0, the server will not use a grace period
-// for shutdown but instead close immediately.
-func WithGracePeriod(d time.Duration) ServerOption {
+// WithShutDownGracePeriod configures how long the server should wait for
+// client connections to close during shutdown. If d is 0, the server will
+// not use a grace period for shutdown but instead close immediately.
+func WithShutDownGracePeriod(d time.Duration) ServerOption {
 	return func(o *ServerOptions) error {
 		o.gracePeriod = d
+		return nil
+	}
+}
+
+func WithNamespaces(namespaces ...string) ServerOption {
+	return func(o *ServerOptions) error {
+		o.namespaces = namespaces
 		return nil
 	}
 }
