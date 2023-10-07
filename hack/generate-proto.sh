@@ -22,7 +22,8 @@ for p in ${GENERATE_PATHS}; do
 		echo "--> Generating Protobuf and gRPC client for $api_name"
 		mkdir -p ${PROJECT_ROOT}/pkg/api/grpc/${api_name}
 		protoc  -I=${src_path} \
-			-I=${PROJECT_ROOT}/external/proto \
+			-I=${PROJECT_ROOT}/vendor \
+			-I=${PROJECT_ROOT}/proto \
 			-I=${PROJECT_ROOT}/dist/protoc-include \
 			--go_out=${PROJECT_ROOT}/pkg/api/grpc/${api_name} \
 			--go_opt=paths=source_relative \

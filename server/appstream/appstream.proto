@@ -6,16 +6,23 @@ package appstreamapi;
 
 import "google/api/annotations.proto";
 
+// The following imports require dependencies to be vendored in
+import "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1/generated.proto";
+
 message Subscription {
-    repeated string namespaces = 1;
+    github.com.argoproj.argo_cd.v2.pkg.apis.application.v1alpha1.Application application = 1;
 }
 
-message SubscriptionStream {
-    string appName = 1;
+message PushSummary {
+    string result = 1;
 }
 
 service AppStream {
-    rpc Subscribe(Subscription) returns (SubscriptionStream) {
+    rpc Subscribe(stream Subscription) returns (stream Subscription) {
         option (google.api.http).get = "/api/v1/appstream";
+    }
+
+    rpc Push(stream Subscription) returns (PushSummary) {
+        option (google.api.http).get = "/api/v1/push";
     }
 }

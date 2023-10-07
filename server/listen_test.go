@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"net/http"
 	"path"
 	"testing"
 	"time"
@@ -19,16 +18,16 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-type slowedClient struct{}
+// type slowedClient struct{}
 
-func (c *slowedClient) RoundTrip(r *http.Request) (*http.Response, error) {
-	t := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-	}
-	return t.RoundTrip(r)
-}
+// func (c *slowedClient) RoundTrip(r *http.Request) (*http.Response, error) {
+// 	t := &http.Transport{
+// 		TLSClientConfig: &tls.Config{
+// 			InsecureSkipVerify: true,
+// 		},
+// 	}
+// 	return t.RoundTrip(r)
+// }
 
 func Test_parseAddress(t *testing.T) {
 	tc := []struct {

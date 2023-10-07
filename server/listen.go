@@ -4,9 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	golog "log"
 	"net"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -14,8 +12,10 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/wait"
 
+	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/appstreamapi"
 	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/authapi"
 	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/versionapi"
+	"github.com/jannfis/argocd-application-agent/server/appstream"
 	"github.com/jannfis/argocd-application-agent/server/auth"
 	"github.com/jannfis/argocd-application-agent/server/version"
 	log "github.com/sirupsen/logrus"
@@ -115,6 +115,7 @@ func (s *Server) ServeGRPC(ctx context.Context, errch chan error) error {
 
 	authapi.RegisterAuthenticationServer(s.grpcServer, auth.NewServer(s.authMethods))
 	versionapi.RegisterVersionServer(s.grpcServer, version.NewServer())
+	appstreamapi.RegisterAppStreamServer(s.grpcServer, appstream.NewServer(s.queues))
 	go func() {
 		err = s.grpcServer.Serve(s.listener.l)
 		errch <- err
@@ -123,27 +124,27 @@ func (s *Server) ServeGRPC(ctx context.Context, errch chan error) error {
 	return nil
 }
 
-func (s *Server) ServeHTTP(ctx context.Context, errch chan error) error {
-	err := s.Listen(ctx, listenerBackoff)
-	if err != nil {
-		return fmt.Errorf("could not start listener: %w", err)
-	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-		w.Write([]byte("hello workd"))
-	})
-	s.server = &http.Server{
-		BaseContext: func(l net.Listener) context.Context {
-			return s.listener.ctx
-		},
-		TLSConfig: s.tlsConfig,
-		ErrorLog:  golog.New(log.New().WriterLevel(log.WarnLevel), "", 0),
-		Handler:   mux,
-	}
-	go func() {
-		err = s.server.Serve(s.listener.l)
-		errch <- err
-	}()
-	return nil
-}
+// func (s *Server) ServeHTTP(ctx context.Context, errch chan error) error {
+// 	err := s.Listen(ctx, listenerBackoff)
+// 	if err != nil {
+// 		return fmt.Errorf("could not start listener: %w", err)
+// 	}
+// 	mux := http.NewServeMux()
+// 	mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
+// 		w.WriteHeader(200)
+// 		w.Write([]byte("hello workd"))
+// 	})
+// 	s.server = &http.Server{
+// 		BaseContext: func(l net.Listener) context.Context {
+// 			return s.listener.ctx
+// 		},
+// 		TLSConfig: s.tlsConfig,
+// 		ErrorLog:  golog.New(log.New().WriterLevel(log.WarnLevel), "", 0),
+// 		Handler:   mux,
+// 	}
+// 	go func() {
+// 		err = s.server.Serve(s.listener.l)
+// 		errch <- err
+// 	}()
+// 	return nil
+// }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jannfis/argocd-application-agent/internal/auth"
+	"github.com/jannfis/argocd-application-agent/internal/queue"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
@@ -20,6 +21,7 @@ type Server struct {
 	server      *http.Server
 	grpcServer  *grpc.Server
 	authMethods *auth.Methods
+	queues      *queue.SendRecvQueues
 }
 
 func NewServer(opts ...ServerOption) (*Server, error) {
@@ -33,6 +35,7 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 	s := &Server{
 		options:     options,
 		authMethods: auth.NewMethods(),
+		queues:      queue.NewSendRecvQueues(),
 	}
 	return s, nil
 }

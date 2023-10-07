@@ -22,7 +22,8 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AppStreamClient interface {
-	Subscribe(ctx context.Context, in *Subscription, opts ...grpc.CallOption) (*SubscriptionStream, error)
+	Subscribe(ctx context.Context, opts ...grpc.CallOption) (AppStream_SubscribeClient, error)
+	Push(ctx context.Context, opts ...grpc.CallOption) (AppStream_PushClient, error)
 }
 
 type appStreamClient struct {
@@ -33,20 +34,77 @@ func NewAppStreamClient(cc grpc.ClientConnInterface) AppStreamClient {
 	return &appStreamClient{cc}
 }
 
-func (c *appStreamClient) Subscribe(ctx context.Context, in *Subscription, opts ...grpc.CallOption) (*SubscriptionStream, error) {
-	out := new(SubscriptionStream)
-	err := c.cc.Invoke(ctx, "/appstreamapi.AppStream/Subscribe", in, out, opts...)
+func (c *appStreamClient) Subscribe(ctx context.Context, opts ...grpc.CallOption) (AppStream_SubscribeClient, error) {
+	stream, err := c.cc.NewStream(ctx, &AppStream_ServiceDesc.Streams[0], "/appstreamapi.AppStream/Subscribe", opts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &appStreamSubscribeClient{stream}
+	return x, nil
+}
+
+type AppStream_SubscribeClient interface {
+	Send(*Subscription) error
+	Recv() (*Subscription, error)
+	grpc.ClientStream
+}
+
+type appStreamSubscribeClient struct {
+	grpc.ClientStream
+}
+
+func (x *appStreamSubscribeClient) Send(m *Subscription) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *appStreamSubscribeClient) Recv() (*Subscription, error) {
+	m := new(Subscription)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *appStreamClient) Push(ctx context.Context, opts ...grpc.CallOption) (AppStream_PushClient, error) {
+	stream, err := c.cc.NewStream(ctx, &AppStream_ServiceDesc.Streams[1], "/appstreamapi.AppStream/Push", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &appStreamPushClient{stream}
+	return x, nil
+}
+
+type AppStream_PushClient interface {
+	Send(*Subscription) error
+	CloseAndRecv() (*PushSummary, error)
+	grpc.ClientStream
+}
+
+type appStreamPushClient struct {
+	grpc.ClientStream
+}
+
+func (x *appStreamPushClient) Send(m *Subscription) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *appStreamPushClient) CloseAndRecv() (*PushSummary, error) {
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	m := new(PushSummary)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // AppStreamServer is the server API for AppStream service.
 // All implementations must embed UnimplementedAppStreamServer
 // for forward compatibility
 type AppStreamServer interface {
-	Subscribe(context.Context, *Subscription) (*SubscriptionStream, error)
+	Subscribe(AppStream_SubscribeServer) error
+	Push(AppStream_PushServer) error
 	mustEmbedUnimplementedAppStreamServer()
 }
 
@@ -54,8 +112,11 @@ type AppStreamServer interface {
 type UnimplementedAppStreamServer struct {
 }
 
-func (UnimplementedAppStreamServer) Subscribe(context.Context, *Subscription) (*SubscriptionStream, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Subscribe not implemented")
+func (UnimplementedAppStreamServer) Subscribe(AppStream_SubscribeServer) error {
+	return status.Errorf(codes.Unimplemented, "method Subscribe not implemented")
+}
+func (UnimplementedAppStreamServer) Push(AppStream_PushServer) error {
+	return status.Errorf(codes.Unimplemented, "method Push not implemented")
 }
 func (UnimplementedAppStreamServer) mustEmbedUnimplementedAppStreamServer() {}
 
@@ -70,22 +131,56 @@ func RegisterAppStreamServer(s grpc.ServiceRegistrar, srv AppStreamServer) {
 	s.RegisterService(&AppStream_ServiceDesc, srv)
 }
 
-func _AppStream_Subscribe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Subscription)
-	if err := dec(in); err != nil {
+func _AppStream_Subscribe_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AppStreamServer).Subscribe(&appStreamSubscribeServer{stream})
+}
+
+type AppStream_SubscribeServer interface {
+	Send(*Subscription) error
+	Recv() (*Subscription, error)
+	grpc.ServerStream
+}
+
+type appStreamSubscribeServer struct {
+	grpc.ServerStream
+}
+
+func (x *appStreamSubscribeServer) Send(m *Subscription) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *appStreamSubscribeServer) Recv() (*Subscription, error) {
+	m := new(Subscription)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
-	if interceptor == nil {
-		return srv.(AppStreamServer).Subscribe(ctx, in)
+	return m, nil
+}
+
+func _AppStream_Push_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AppStreamServer).Push(&appStreamPushServer{stream})
+}
+
+type AppStream_PushServer interface {
+	SendAndClose(*PushSummary) error
+	Recv() (*Subscription, error)
+	grpc.ServerStream
+}
+
+type appStreamPushServer struct {
+	grpc.ServerStream
+}
+
+func (x *appStreamPushServer) SendAndClose(m *PushSummary) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *appStreamPushServer) Recv() (*Subscription, error) {
+	m := new(Subscription)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
 	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/appstreamapi.AppStream/Subscribe",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AppStreamServer).Subscribe(ctx, req.(*Subscription))
-	}
-	return interceptor(ctx, in, info, handler)
+	return m, nil
 }
 
 // AppStream_ServiceDesc is the grpc.ServiceDesc for AppStream service.
@@ -94,12 +189,19 @@ func _AppStream_Subscribe_Handler(srv interface{}, ctx context.Context, dec func
 var AppStream_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "appstreamapi.AppStream",
 	HandlerType: (*AppStreamServer)(nil),
-	Methods: []grpc.MethodDesc{
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
 		{
-			MethodName: "Subscribe",
-			Handler:    _AppStream_Subscribe_Handler,
+			StreamName:    "Subscribe",
+			Handler:       _AppStream_Subscribe_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "Push",
+			Handler:       _AppStream_Push_Handler,
+			ClientStreams: true,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
 	Metadata: "appstream.proto",
 }

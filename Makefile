@@ -7,5 +7,6 @@ test:
 	mkdir -p test/out
 	go test -race -coverprofile test/out/test.coverage ./...
 
-profile:
-
+.PHONY: protogen
+protogen:
+	./hack/generate-proto.sh
