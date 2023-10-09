@@ -164,3 +164,15 @@ func (s *Server) ServeGRPC(ctx context.Context, errch chan error) error {
 // 	}()
 // 	return nil
 // }
+
+func (l *Listener) Host() string {
+	return l.host
+}
+
+func (l *Listener) Port() int {
+	return l.port
+}
+
+func (l *Listener) Address() string {
+	return fmt.Sprintf("%s:%d", l.host, l.port)
+}

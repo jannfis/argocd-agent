@@ -1,9 +1,11 @@
-package server
+package e2e
 
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"math/big"
 	"path"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
 	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/eventstreamapi"
+	"github.com/jannfis/argocd-application-agent/server"
 	fakecerts "github.com/jannfis/argocd-application-agent/test/fake/certs"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -21,11 +24,22 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func newStreamingClient(t *testing.T, s *Server) (eventstreamapi.EventStreamClient, *grpc.ClientConn) {
+var certTempl = x509.Certificate{
+	SerialNumber:          big.NewInt(1),
+	KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+	ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	BasicConstraintsValid: true,
+	NotBefore:             time.Now().Add(-1 * time.Hour),
+	NotAfter:              time.Now().Add(1 * time.Hour),
+}
+
+var testNamespace = "default"
+
+func newStreamingClient(t *testing.T, s *server.Server) (eventstreamapi.EventStreamClient, *grpc.ClientConn) {
 	t.Helper()
 	tlsC := &tls.Config{InsecureSkipVerify: true}
 	creds := credentials.NewTLS(tlsC)
-	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", s.listener.host, s.listener.port),
+	conn, err := grpc.Dial(s.Listener().Address(),
 		grpc.WithTransportCredentials(creds))
 	require.NoError(t, err)
 	return eventstreamapi.NewEventStreamClient(conn), conn
@@ -38,18 +52,18 @@ func Test_EndToEnd(t *testing.T) {
 	appC := fakeappclient.NewSimpleClientset()
 	errch := make(chan error)
 
-	s, err := NewServer(appC, testNamespace,
-		WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
-		WithListenerPort(0),
-		WithListenerAddress("127.0.0.1"),
-		WithShutDownGracePeriod(2*time.Second),
+	s, err := server.NewServer(appC, testNamespace,
+		server.WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
+		server.WithListenerPort(0),
+		server.WithListenerAddress("127.0.0.1"),
+		server.WithShutDownGracePeriod(2*time.Second),
 	)
 	require.NoError(t, err)
 
 	err = s.ServeGRPC(context.Background(), errch)
 	assert.NoError(t, err)
 
-	token, err := s.issuer.Issue("default", 1*time.Minute)
+	token, err := s.Issuer().Issue("default", 1*time.Minute)
 	require.NoError(t, err)
 
 	clientCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -108,4 +122,8 @@ func Test_EndToEnd(t *testing.T) {
 		}
 	}
 	s.ShutDown()
+}
+
+func log() *logrus.Entry {
+	return logrus.NewEntry(logrus.StandardLogger())
 }

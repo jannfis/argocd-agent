@@ -34,6 +34,12 @@ func Test_Authenticate(t *testing.T) {
 		)
 		require.NoError(t, err)
 		assert.Equal(t, types.AuthResultOK, r.Result)
+		assert.NotEmpty(t, r.Token)
+		claims, err := auths.issuer.Validate(r.Token)
+		assert.NoError(t, err)
+		userid, err := claims.GetSubject()
+		assert.NoError(t, err)
+		assert.Equal(t, "user1", userid)
 	})
 
 	t.Run("Wrong credentials", func(t *testing.T) {

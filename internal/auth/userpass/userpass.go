@@ -14,7 +14,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var _ auth.Method = &userPassAuthentication{}
+var _ auth.Method = &UserPassAuthentication{}
 
 // ClientIDField is the name of the field in the Credentials containing the client ID
 const ClientIDField = "clientid"
@@ -22,21 +22,24 @@ const ClientIDField = "clientid"
 // ClientSecretField is the name of the field in the Credentials containing the client secret
 const ClientSecretField = "clientsecret"
 
-type userPassAuthentication struct {
+// UserPassAuthentication implements a simple username/password authentication
+// method.
+type UserPassAuthentication struct {
 	lock   sync.RWMutex
 	userdb map[string]string
 	dummy  []byte
 }
 
-func NewUserPassAuthentication() *userPassAuthentication {
+func NewUserPassAuthentication() *UserPassAuthentication {
 	dummy, _ := bcrypt.GenerateFromPassword([]byte("bdf3fdc6da5b5029e83f3024858c3c1e6aa3d1e71fa09e4691212f7571b5a3e3"), bcrypt.DefaultCost)
-	return &userPassAuthentication{
+	return &UserPassAuthentication{
 		userdb: make(map[string]string),
 		dummy:  dummy,
 	}
 }
 
-func (a *userPassAuthentication) Authenticate(creds auth.Credentials) (clientID string, autherr error) {
+// Authenticate takes the credentials in creds and tries to authenticate them.
+func (a *UserPassAuthentication) Authenticate(creds auth.Credentials) (clientID string, autherr error) {
 	username, ok := creds[ClientIDField]
 	if !ok {
 		return "", fmt.Errorf("username is missing from credentials")
@@ -48,8 +51,9 @@ func (a *userPassAuthentication) Authenticate(creds auth.Credentials) (clientID 
 
 	a.lock.RLock()
 	pass, ok := a.userdb[username]
-	// Unlock early, because bcrypt is expensive and takes a while
+	// We unlock explictly instead of using defer, because bcrypt is expensive
 	a.lock.RUnlock()
+
 	if !ok {
 		// To make timing attacks a little more complex, we compare the given
 		// password with our dummy hash.
@@ -65,7 +69,7 @@ func (a *userPassAuthentication) Authenticate(creds auth.Credentials) (clientID 
 }
 
 // UpsertUser adds or updates a user with username and password
-func (a *userPassAuthentication) UpsertUser(username, password string) {
+func (a *UserPassAuthentication) UpsertUser(username, password string) {
 	a.lock.Lock()
 	defer a.lock.Unlock()
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -82,7 +86,7 @@ var clientIDRe = regexp.MustCompile(`^[a-fA-F0-9]{32}$`)
 // We actually support all current bcrypt variants
 var clientSecretRe = regexp.MustCompile(`^\$2[abxy]\$[0-9]{2}.*`)
 
-func (a *userPassAuthentication) LoadUserDBFromFile(path string) error {
+func (a *UserPassAuthentication) LoadUserDBFromFile(path string) error {
 	newUserDB := make(map[string]string)
 	f, err := os.Open(path)
 	if err != nil {

@@ -121,6 +121,14 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
+func (s *Server) Listener() *Listener {
+	return s.listener
+}
+
+func (s *Server) Issuer() *token.Issuer {
+	return s.issuer
+}
+
 func log() *logrus.Entry {
 	return logrus.WithField("module", "server")
 }

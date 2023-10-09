@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"time"
 
 	"github.com/jannfis/argocd-application-agent/internal/auth"
 	"github.com/jannfis/argocd-application-agent/internal/token"
 	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/authapi"
 	"github.com/jannfis/argocd-application-agent/pkg/types"
+	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -72,8 +74,17 @@ func (s *server) Authenticate(ctx context.Context, a *authapi.AuthRequest) (*aut
 	if clientID == "" || err != nil {
 		return authenticationFailed(""), status.Error(codes.Unauthenticated, "authentication failed")
 	}
+	token, err := s.issuer.Issue(clientID, 1*time.Hour)
+	if err != nil {
+		log().WithField("method", "Authenticate").WithError(err).Warnf("Unable to generate token")
+		return authenticationFailed(""), status.Error(codes.Internal, "unable to generate a token")
+	}
 	return &authapi.AuthResponse{
 		Result: types.AuthResultOK,
-		Token:  "abcd123",
+		Token:  token,
 	}, nil
+}
+
+func log() *logrus.Entry {
+	return logrus.WithField("module", "grpc.AuthenticationServer")
 }
