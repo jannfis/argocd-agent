@@ -16,9 +16,9 @@ func NewMethods() *Methods {
 	return &Methods{methods: make(map[string]Method)}
 }
 
-// RegisterAuthMethod registers the auth method with the given name. If another
+// RegisterMethod registers the auth method with the given name. If another
 // method is already registered with the same name, returns error.
-func (m *Methods) RegisterAuthMethod(name string, method Method) error {
+func (m *Methods) RegisterMethod(name string, method Method) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	_, ok := m.methods[name]
@@ -29,9 +29,9 @@ func (m *Methods) RegisterAuthMethod(name string, method Method) error {
 	return nil
 }
 
-// AuthMethod gets the authentication method identified by name. If no such
+// Method gets the authentication method identified by name. If no such
 // method exists, returns nil.
-func (m *Methods) AuthMethod(name string) Method {
+func (m *Methods) Method(name string) Method {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 	method, ok := m.methods[name]

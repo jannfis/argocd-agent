@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -35,6 +36,7 @@ func Test_EndToEnd(t *testing.T) {
 	templ := certTempl
 	fakecerts.WriteFakeRSAKeyPair(t, path.Join(tempDir, "test-cert"), templ)
 	appC := fakeappclient.NewSimpleClientset()
+	errch := make(chan error)
 
 	s, err := NewServer(appC, testNamespace,
 		WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
@@ -43,38 +45,55 @@ func Test_EndToEnd(t *testing.T) {
 		WithShutDownGracePeriod(2*time.Second),
 	)
 	require.NoError(t, err)
-	errch := make(chan error)
+
 	err = s.ServeGRPC(context.Background(), errch)
 	assert.NoError(t, err)
-	// ticker := time.NewTicker(500 * time.Millisecond)
-	// timeout := time.NewTicker(2 * time.Second)
-	// agentName := "testagent"
-	// if !s.queues.HasQueuePair(agentName) {
-	// 	s.queues.Create(agentName)
-	// }
+
+	token, err := s.issuer.Issue("default", 1*time.Minute)
+	require.NoError(t, err)
+
+	clientCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	clientCtx = metadata.AppendToOutgoingContext(clientCtx, "authorization", token)
 
 	client, conn := newStreamingClient(t, s)
 	defer conn.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	sub, err := client.Subscribe(ctx)
+
+	sub, err := client.Subscribe(clientCtx)
 	require.NotNil(t, sub)
 	require.NoError(t, err)
+
 	waitc := make(chan struct{})
 	serverRunning := true
 	appsCreated := 0
+
+	go func() {
+		numRecvd := 0
+		for {
+			ev, err := sub.Recv()
+			require.NoError(t, err)
+			numRecvd += 1
+			logrus.WithField("module", "test-client").Infof("Received event %v", ev)
+			if numRecvd >= 4 {
+				logrus.Infof("Finished receiving")
+				break
+			}
+		}
+		close(waitc)
+	}()
+
 	for serverRunning {
 		select {
-		case <-sub.Context().Done():
+		case <-clientCtx.Done():
 			logrus.Infof("Done")
-			sub.CloseSend()
-			s.Stop()
 			serverRunning = false
 		case <-waitc:
-			sub.CloseSend()
+			logrus.Infof("Client closed the connection")
 			serverRunning = false
 		default:
 			if appsCreated > 4 {
+				log().Infof("Reached limit")
+				serverRunning = false
 				continue
 			}
 			time.Sleep(100 * time.Millisecond)
@@ -88,21 +107,5 @@ func Test_EndToEnd(t *testing.T) {
 			appsCreated += 1
 		}
 	}
-
-	appC.ArgoprojV1alpha1().Applications("")
-	// select {
-	// case <-ticker.C:
-	// 	r, err := client.Version(context.Background(), &versionapi.VersionRequest{})
-	// 	require.NoError(t, err)
-	// 	assert.Equal(t, r.Version, version.QualifiedVersion())
-	// 	s.Stop()
-	// 	ticker.Stop()
-	// case <-timeout.C:
-	// 	t.Fatalf("Timed out waiting for cancel")
-	// case err = <-errch:
-	// 	require.NoError(t, err)
-	// default:
-	// 	time.Sleep(100 * time.Millisecond)
-	// }
-
+	s.ShutDown()
 }

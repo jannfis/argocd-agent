@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/rsa"
 	"crypto/tls"
 	"fmt"
 	"time"
@@ -22,6 +23,7 @@ type ServerOptions struct {
 	tlsMinVersion int
 	gracePeriod   time.Duration
 	namespaces    []string
+	signingKey    *rsa.PrivateKey
 }
 
 type ServerOption func(o *ServerOptions) error
@@ -34,6 +36,15 @@ func defaultOptions() *ServerOptions {
 		tlsCert:       "/etc/tls/certs/server.crt",
 		tlsKey:        "/etc/tls/private/server.key",
 		tlsMinVersion: tls.VersionTLS13,
+	}
+}
+
+// WithTokenSigningKey sets the RSA private key to use for signing the tokens
+// issued by the Server
+func WithTokenSigningKey(key *rsa.PrivateKey) ServerOption {
+	return func(o *ServerOptions) error {
+		o.signingKey = key
+		return nil
 	}
 }
 

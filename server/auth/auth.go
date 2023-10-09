@@ -2,8 +2,11 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 
 	"github.com/jannfis/argocd-application-agent/internal/auth"
+	"github.com/jannfis/argocd-application-agent/internal/token"
 	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/authapi"
 	"github.com/jannfis/argocd-application-agent/pkg/types"
 	"google.golang.org/grpc/codes"
@@ -13,6 +16,7 @@ import (
 type server struct {
 	authapi.UnimplementedAuthenticationServer
 	authMethods *auth.Methods
+	issuer      *token.Issuer
 	options     *ServerOptions
 }
 
@@ -23,7 +27,7 @@ type ServerOption func(o *ServerOptions) error
 
 // NewServer creates a new instance of an authentication server with the given
 // authentication methods and options.
-func NewServer(authMethods *auth.Methods, opts ...ServerOption) *server {
+func NewServer(authMethods *auth.Methods, issuer *token.Issuer, opts ...ServerOption) *server {
 	s := &server{}
 	s.options = &ServerOptions{}
 	if authMethods != nil {
@@ -31,6 +35,17 @@ func NewServer(authMethods *auth.Methods, opts ...ServerOption) *server {
 	} else {
 		s.authMethods = auth.NewMethods()
 	}
+	if issuer == nil {
+		key, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			return nil
+		}
+		issuer, err = token.NewIssuer("default", token.WithPrivateRSAKey(key))
+		if err != nil {
+			return nil
+		}
+	}
+	s.issuer = issuer
 	for _, o := range opts {
 		o(s.options)
 	}
@@ -43,13 +58,18 @@ func authenticationFailed(reason string) *authapi.AuthResponse {
 	}
 }
 
+// Authenticate provides an authz endpoint for the Server. The client is
+// supposed to specify the authentication method and the credentials to use.
+//
+// A Server may support one or more authentication methods, and if the authz
+// request succeeds, a JWT will be issued to the client.
 func (s *server) Authenticate(ctx context.Context, a *authapi.AuthRequest) (*authapi.AuthResponse, error) {
-	am := s.authMethods.AuthMethod(a.Method)
+	am := s.authMethods.Method(a.Method)
 	if am == nil {
 		return authenticationFailed(""), status.Error(codes.Unauthenticated, "unsupported authentication method")
 	}
-	ok, err := am.Authenticate(a.Credentials)
-	if !ok || err != nil {
+	clientID, err := am.Authenticate(a.Credentials)
+	if clientID == "" || err != nil {
 		return authenticationFailed(""), status.Error(codes.Unauthenticated, "authentication failed")
 	}
 	return &authapi.AuthResponse{

@@ -1,11 +1,13 @@
 package eventstream
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/jannfis/argocd-application-agent/internal/queue"
 	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/eventstreamapi"
+	"github.com/jannfis/argocd-application-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -60,20 +62,28 @@ func NewServer(queues *queue.SendRecvQueues, opts ...ServerOption) *server {
 // The connection is kept open until the agent closes it, and the stream tries
 // to send updates to the agent as long as possible.
 func (s *server) Subscribe(sc eventstreamapi.EventStream_SubscribeServer) error {
-	waitc := make(chan struct{})
+	recvWaitC := make(chan struct{})
+	sendWaitC := make(chan struct{})
+
 	logCtx := log().WithField("method", "Subscribe")
 
-	agentName := "default"
-	v := sc.Context().Value("agent_name")
-	logCtx.Debugf("Agent name: %v", v)
+	agentName, ok := sc.Context().Value(types.ContextAgentIdentifier).(string)
+	if !ok {
+		return fmt.Errorf("cannot process connection: invalid context: no agent name")
+	}
 
-	// Recv() is blocking, so we run the receiver part in its own go routine
+	logCtx = logCtx.WithField("client", agentName)
+	logCtx.Debug("A new client connected to the event stream")
+
+	// We receive events in a dedicated go routine
 	go func() {
 		logCtx := logCtx.WithField("direction", "recv")
 		for {
+			logCtx.Tracef("Waiting to receive from channel")
 			u, err := sc.Recv()
 			if err == io.EOF {
-				close(waitc)
+				logCtx.Tracef("Remote end hung up")
+				close(recvWaitC)
 				return
 			}
 			// TODO: How to handle non-EOF errors?
@@ -82,47 +92,62 @@ func (s *server) Subscribe(sc eventstreamapi.EventStream_SubscribeServer) error 
 				if !ok || (st.Code() != codes.DeadlineExceeded && st.Code() != codes.Canceled) {
 					logCtx.WithError(err).Error("Error receiving application update")
 				}
-				close(waitc)
+				close(recvWaitC)
 				return
 			}
 			logCtx.Infof("Received update for application %v (%p)", u.Application.QualifiedName(), u.Application)
 			q := s.queues.RecvQ(agentName)
 			if q == nil {
 				logCtx.Warnf("I have no receive queue for agent")
-				continue
+				close(recvWaitC)
+				return
 			}
 			q.Add(u.Application)
 		}
 	}()
+
+	// We send events in a dedicated go routine
 	go func() {
 		logCtx := logCtx.WithField("direction", "send")
+		logCtx.Tracef("Starting go routine in sending direction")
 		for {
 			select {
-			case <-waitc:
+			case <-recvWaitC:
 				logCtx.Info("Shutdown requested")
+				close(sendWaitC)
 				return
 			case <-sc.Context().Done():
 				logCtx.Info("Context canceled")
+				close(sendWaitC)
 				return
 			default:
 				q := s.queues.SendQ(agentName)
 				if q == nil {
 					logCtx.Warnf("I have no send queue for agent")
-					continue
-				}
-				item, shutdown := q.Get()
-				if shutdown {
-					close(waitc)
+					close(sendWaitC)
 					return
 				}
+				// Get() is blocking until there is at least one item in the
+				// queue.
+				logCtx.Tracef("Grabbing item from queue")
+				item, shutdown := q.Get()
+				if shutdown {
+					logCtx.Tracef("Queue shutdown in progress")
+					close(sendWaitC)
+					return
+				}
+				logCtx.Tracef("Grabbed an item")
 				if item == nil {
 					return
 				}
+
 				app, ok := item.(*v1alpha1.Application)
 				if !ok {
 					logCtx.Warnf("invalid data in sendqueue")
 					continue
 				}
+
+				// A Send() on the stream is actually not blocking.
 				err := sc.Send(&eventstreamapi.Event{Application: app.DeepCopy()})
 				// TODO: How to handle errors on send?
 				if err != nil {
@@ -133,7 +158,7 @@ func (s *server) Subscribe(sc eventstreamapi.EventStream_SubscribeServer) error 
 		}
 	}()
 
-	<-waitc
+	<-recvWaitC
 	return nil
 }
 

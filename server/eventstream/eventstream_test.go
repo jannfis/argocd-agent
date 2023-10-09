@@ -9,6 +9,7 @@ import (
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/jannfis/argocd-application-agent/internal/queue"
 	"github.com/jannfis/argocd-application-agent/server/eventstream/mock"
+	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/stretchr/testify/assert"
@@ -19,10 +20,12 @@ func Test_Subscribe(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("default")
 		s := NewServer(qs)
-		st := &mock.MockEventServer{}
+		st := &mock.MockEventServer{AgentName: "default"}
 		st.AddRecvHook(func(s *mock.MockEventServer) error {
+			log().WithField("component", "RecvHook").Tracef("Entry")
 			ticker := time.NewTicker(500 * time.Millisecond)
 			<-ticker.C
+			log().WithField("component", "RecvHook").Tracef("Exit")
 			return io.EOF
 		})
 		qs.SendQ("default").Add(&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "test"}})
@@ -36,7 +39,7 @@ func Test_Subscribe(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("default")
 		s := NewServer(qs)
-		st := &mock.MockEventServer{MaxRecv: 2, Application: v1alpha1.Application{
+		st := &mock.MockEventServer{AgentName: "default", Application: v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "foo",
 				Namespace: "default",
@@ -61,7 +64,7 @@ func Test_Subscribe(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("default")
 		s := NewServer(qs)
-		st := &mock.MockEventServer{}
+		st := &mock.MockEventServer{AgentName: "default"}
 		st.AddRecvHook(func(s *mock.MockEventServer) error {
 			return fmt.Errorf("some error")
 		})
@@ -71,4 +74,8 @@ func Test_Subscribe(t *testing.T) {
 		assert.Equal(t, 0, int(st.NumSent.Load()))
 	})
 
+}
+
+func init() {
+	logrus.SetLevel(logrus.TraceLevel)
 }

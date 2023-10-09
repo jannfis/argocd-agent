@@ -5,5 +5,5 @@ type Credentials map[string]string
 
 // Method is the interface to be implemented by all auth methods
 type Method interface {
-	Authenticate(credentials Credentials) (bool, error)
+	Authenticate(credentials Credentials) (string, error)
 }

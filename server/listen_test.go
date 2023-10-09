@@ -119,7 +119,7 @@ func Test_Serve(t *testing.T) {
 			r, err := client.Version(context.Background(), &versionapi.VersionRequest{})
 			require.NoError(t, err)
 			assert.Equal(t, r.Version, version.QualifiedVersion())
-			s.Stop()
+			s.ShutDown()
 			ticker.Stop()
 		case <-timeout.C:
 			t.Fatalf("Timed out waiting for cancel")

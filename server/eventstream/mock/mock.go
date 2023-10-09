@@ -3,10 +3,10 @@ package mock
 import (
 	"context"
 	"sync/atomic"
-	"time"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/eventstreamapi"
+	"github.com/jannfis/argocd-application-agent/pkg/types"
 	"google.golang.org/grpc"
 )
 
@@ -21,16 +21,16 @@ type RecvHook func(s *MockEventServer) error
 type MockEventServer struct {
 	grpc.ServerStream
 
+	AgentName   string
 	NumSent     atomic.Uint32
-	MaxSend     int
 	NumRecv     atomic.Uint32
-	MaxRecv     int
-	BlockRecv   time.Duration
-	RecvErr     error
-	SendErr     error
 	Application v1alpha1.Application
 	RecvHooks   []RecvHook
 	SendHooks   []SendHook
+}
+
+func NewMockEventServer() *MockEventServer {
+	return &MockEventServer{AgentName: "default"}
 }
 
 func (s *MockEventServer) AddSendHook(hook SendHook) {
@@ -42,7 +42,7 @@ func (s *MockEventServer) AddRecvHook(hook RecvHook) {
 }
 
 func (s *MockEventServer) Context() context.Context {
-	return context.WithValue(context.TODO(), "agent_name", "default")
+	return context.WithValue(context.TODO(), types.ContextAgentIdentifier, s.AgentName)
 }
 
 func (s *MockEventServer) Send(sub *eventstreamapi.Event) error {

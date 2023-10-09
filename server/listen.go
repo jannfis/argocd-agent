@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/auth"
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/wait"
 
@@ -110,24 +111,30 @@ func (s *Server) ServeGRPC(ctx context.Context, errch chan error) error {
 	if err != nil {
 		return fmt.Errorf("could not start listener: %w", err)
 	}
-	s.grpcServer = grpc.NewServer()
 
-	authapi.RegisterAuthenticationServer(s.grpcServer, auth.NewServer(s.authMethods))
+	s.grpcServer = grpc.NewServer(
+		grpc.ChainStreamInterceptor(
+			grpc_auth.StreamServerInterceptor(func(ctx context.Context) (context.Context, error) {
+				return s.Authenticate(ctx)
+			}),
+		),
+	)
+
+	authapi.RegisterAuthenticationServer(s.grpcServer, auth.NewServer(s.authMethods, s.issuer))
 	versionapi.RegisterVersionServer(s.grpcServer, version.NewServer())
 	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues))
-	stopch := make(chan struct{})
 
 	// The gRPC server lives in its own go routine
 	go func() {
 		err = s.grpcServer.Serve(s.listener.l)
-		close(stopch)
+		close(s.informerCh)
 		errch <- err
 	}()
 
 	// The application informer lives in its own go routine
 	if s.informer != nil {
 		go func() {
-			s.informer.Start(stopch)
+			s.informer.Start(s.informerCh)
 		}()
 	}
 	return nil

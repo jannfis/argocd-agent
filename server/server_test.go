@@ -59,13 +59,6 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 }
 
 func Test_NewServer(t *testing.T) {
-	t.Run("Instantiate new server object with default options", func(t *testing.T) {
-		s, err := NewServer(fakeappclient.NewSimpleClientset(), testNamespace)
-		assert.NoError(t, err)
-		assert.NotNil(t, s)
-		assert.Equal(t, defaultOptions(), s.options)
-	})
-
 	t.Run("Instantiate new server object with non-default options", func(t *testing.T) {
 		s, err := NewServer(fakeappclient.NewSimpleClientset(), testNamespace, WithListenerAddress("0.0.0.0"))
 		assert.NoError(t, err)

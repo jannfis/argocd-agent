@@ -1,50 +1,128 @@
 package userpass
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"regexp"
+	"strings"
 	"sync"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/jannfis/argocd-application-agent/internal/auth"
+	"github.com/sirupsen/logrus"
 )
+
+var _ auth.Method = &userPassAuthentication{}
+
+// ClientIDField is the name of the field in the Credentials containing the client ID
+const ClientIDField = "clientid"
+
+// ClientSecretField is the name of the field in the Credentials containing the client secret
+const ClientSecretField = "clientsecret"
 
 type userPassAuthentication struct {
 	lock   sync.RWMutex
 	userdb map[string]string
+	dummy  []byte
 }
 
 func NewUserPassAuthentication() *userPassAuthentication {
+	dummy, _ := bcrypt.GenerateFromPassword([]byte("bdf3fdc6da5b5029e83f3024858c3c1e6aa3d1e71fa09e4691212f7571b5a3e3"), bcrypt.DefaultCost)
 	return &userPassAuthentication{
 		userdb: make(map[string]string),
+		dummy:  dummy,
 	}
 }
 
-func (a *userPassAuthentication) Authenticate(creds auth.Credentials) (authenticated bool, autherr error) {
-	username, ok := creds["username"]
+func (a *userPassAuthentication) Authenticate(creds auth.Credentials) (clientID string, autherr error) {
+	username, ok := creds[ClientIDField]
 	if !ok {
-		return false, fmt.Errorf("username is missing from credentials")
+		return "", fmt.Errorf("username is missing from credentials")
 	}
-	password, ok := creds["password"]
+	password, ok := creds[ClientSecretField]
 	if !ok {
-		return false, fmt.Errorf("password is missing from credentials")
+		return "", fmt.Errorf("password is missing from credentials")
 	}
 
 	a.lock.RLock()
-	defer a.lock.RUnlock()
-
 	pass, ok := a.userdb[username]
+	// Unlock early, because bcrypt is expensive and takes a while
+	a.lock.RUnlock()
 	if !ok {
-		return false, fmt.Errorf("user not found: %s", username)
+		// To make timing attacks a little more complex, we compare the given
+		// password with our dummy hash.
+		bcrypt.CompareHashAndPassword(a.dummy, []byte(password))
+		return "", fmt.Errorf("authentication failed")
 	}
 
-	if pass == password {
-		return true, nil
+	if err := bcrypt.CompareHashAndPassword([]byte(pass), []byte(password)); err == nil {
+		return username, nil
 	}
 
-	return false, fmt.Errorf("authentication failed")
+	return "", fmt.Errorf("authentication failed")
 }
 
+// UpsertUser adds or updates a user with username and password
 func (a *userPassAuthentication) UpsertUser(username, password string) {
 	a.lock.Lock()
 	defer a.lock.Unlock()
-	a.userdb[username] = password
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err == nil {
+		a.userdb[username] = string(hash)
+	} else {
+		log().WithError(err).Warnf("unable to upsert user")
+	}
+}
+
+// Client ID must be 32 characters, hexadecimal string
+var clientIDRe = regexp.MustCompile(`^[a-fA-F0-9]{32}$`)
+
+// We actually support all current bcrypt variants
+var clientSecretRe = regexp.MustCompile(`^\$2[abxy]\$[0-9]{2}.*`)
+
+func (a *userPassAuthentication) LoadUserDBFromFile(path string) error {
+	newUserDB := make(map[string]string)
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("error loading user DB file: %w", err)
+	}
+	defer f.Close()
+	s := bufio.NewScanner(f)
+	lno := 0
+	for s.Scan() {
+		lno += 1
+		line := strings.TrimSpace(s.Text())
+		if strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+			continue
+		}
+		tok := strings.SplitN(line, ":", 2)
+		if len(tok) != 2 {
+			log().Warnf("Ignoring invalid entry: %s:%d", path, lno)
+			continue
+		}
+		if !clientIDRe.MatchString(tok[0]) {
+			log().Warnf("Client ID isn't valid: %s:%d", path, lno)
+			continue
+		}
+		if !clientSecretRe.MatchString(tok[1]) {
+			log().Warnf("Client secret isn't valid: %s:%d", path, lno)
+			continue
+		}
+		if _, ok := newUserDB[tok[0]]; ok {
+			log().Warnf("Client ID '%s' specified more than once", tok[0])
+		}
+		newUserDB[tok[0]] = tok[1]
+	}
+
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	a.userdb = newUserDB
+
+	return nil
+}
+
+func log() *logrus.Entry {
+	return logrus.WithField("component", "AuthUserPass")
 }

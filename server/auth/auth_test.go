@@ -14,10 +14,10 @@ import (
 
 func Test_Authenticate(t *testing.T) {
 	t.Run("Authentication method unsupported", func(t *testing.T) {
-		auths := NewServer(nil)
+		auths := NewServer(nil, nil)
 		_, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
-			Credentials: map[string]string{"username": "user1", "password": "password"}},
+			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"}},
 		)
 		assert.ErrorContains(t, err, "unsupported authentication method")
 	})
@@ -25,12 +25,12 @@ func Test_Authenticate(t *testing.T) {
 		ams := auth.NewMethods()
 		am := userpass.NewUserPassAuthentication()
 		am.UpsertUser("user1", "password")
-		err := ams.RegisterAuthMethod("userpass", am)
+		err := ams.RegisterMethod("userpass", am)
 		require.NoError(t, err)
-		auths := NewServer(ams)
+		auths := NewServer(ams, nil)
 		r, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
-			Credentials: map[string]string{"username": "user1", "password": "password"}},
+			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"}},
 		)
 		require.NoError(t, err)
 		assert.Equal(t, types.AuthResultOK, r.Result)
@@ -40,12 +40,25 @@ func Test_Authenticate(t *testing.T) {
 		ams := auth.NewMethods()
 		am := userpass.NewUserPassAuthentication()
 		am.UpsertUser("user1", "password")
-		err := ams.RegisterAuthMethod("userpass", am)
+		err := ams.RegisterMethod("userpass", am)
 		require.NoError(t, err)
-		auths := NewServer(ams)
+		auths := NewServer(ams, nil)
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
-			Credentials: map[string]string{"username": "user1", "password": "wordpass"}},
+			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "wordpass"}},
+		)
+		require.ErrorContains(t, err, "authentication failed")
+	})
+	t.Run("Incomplete credentials", func(t *testing.T) {
+		ams := auth.NewMethods()
+		am := userpass.NewUserPassAuthentication()
+		am.UpsertUser("user1", "password")
+		err := ams.RegisterMethod("userpass", am)
+		require.NoError(t, err)
+		auths := NewServer(ams, nil)
+		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
+			Method:      "userpass",
+			Credentials: map[string]string{"foo": "bar"}},
 		)
 		require.ErrorContains(t, err, "authentication failed")
 	})
