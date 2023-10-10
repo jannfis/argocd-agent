@@ -15,6 +15,7 @@ var supportedTLSVersion map[string]int = map[string]int{
 }
 
 type ServerOptions struct {
+	serverName    string
 	port          int
 	address       string
 	tlsCert       string
@@ -24,6 +25,9 @@ type ServerOptions struct {
 	gracePeriod   time.Duration
 	namespaces    []string
 	signingKey    *rsa.PrivateKey
+	unauthMethods map[string]bool
+	serveGRPC     bool
+	serveREST     bool
 }
 
 type ServerOption func(o *ServerOptions) error
@@ -33,9 +37,8 @@ func defaultOptions() *ServerOptions {
 	return &ServerOptions{
 		port:          443,
 		address:       "",
-		tlsCert:       "/etc/tls/certs/server.crt",
-		tlsKey:        "/etc/tls/private/server.key",
 		tlsMinVersion: tls.VersionTLS13,
+		unauthMethods: make(map[string]bool),
 	}
 }
 
@@ -117,9 +120,31 @@ func WithShutDownGracePeriod(d time.Duration) ServerOption {
 	}
 }
 
+// WithNamespaces sets an
 func WithNamespaces(namespaces ...string) ServerOption {
 	return func(o *ServerOptions) error {
 		o.namespaces = namespaces
+		return nil
+	}
+}
+
+func WithGRPC(serveGRPC bool) ServerOption {
+	return func(o *ServerOptions) error {
+		o.serveGRPC = serveGRPC
+		return nil
+	}
+}
+
+func WithREST(serveREST bool) ServerOption {
+	return func(o *ServerOptions) error {
+		o.serveREST = serveREST
+		return nil
+	}
+}
+
+func WithServerName(serverName string) ServerOption {
+	return func(o *ServerOptions) error {
+		o.serverName = serverName
 		return nil
 	}
 }

@@ -15,6 +15,8 @@ import (
 	"github.com/jannfis/argocd-application-agent/internal/auth"
 	"github.com/jannfis/argocd-application-agent/internal/queue"
 	"github.com/jannfis/argocd-application-agent/internal/token"
+	"github.com/jannfis/argocd-application-agent/server/backend"
+	"github.com/jannfis/argocd-application-agent/server/backend/kubernetes"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
@@ -27,10 +29,12 @@ type Server struct {
 	grpcServer  *grpc.Server
 	authMethods *auth.Methods
 	queues      *queue.SendRecvQueues
-	informer    *appinformer.AppInformer
-	informerCh  chan struct{}
-	namespace   string
-	issuer      *token.Issuer
+	// informer    *appinformer.AppInformer
+	// informerCh chan struct{}
+	namespace string
+	issuer    *token.Issuer
+	noauth    map[string]bool // noauth contains endpoints accessible without authentication
+	backend   backend.Application
 }
 
 func NewServer(appClient appclientset.Interface, namespace string, opts ...ServerOption) (*Server, error) {
@@ -63,22 +67,40 @@ func NewServer(appClient appclientset.Interface, namespace string, opts ...Serve
 		authMethods: auth.NewMethods(),
 		queues:      queue.NewSendRecvQueues(),
 		namespace:   namespace,
-		informerCh:  make(chan struct{}),
 		issuer:      issuer,
+		noauth: map[string]bool{
+			"/versionapi.Version/Version":          true,
+			"/authapi.Authentication/Authenticate": true,
+		},
 	}
 
-	s.informer = appinformer.NewAppInformer(appClient,
+	informer := appinformer.NewAppInformer(appClient,
 		s.namespace,
 		appinformer.WithNamespaces(options.namespaces...),
 		appinformer.WithNewAppCallback(s.newAppCallback),
 	)
 
+	s.backend = kubernetes.NewKubernetesBackend(appClient, informer)
+
 	return s, nil
 }
 
-// ShutDown shuts down the server s. If no server is running, or shutting down
+// Start starts the Server s and its listeners in their own go routines. Any
+// error during startup, before the go routines are running, will be returned
+// immediately. Errors during the runtime will be propagated via errch.
+func (s *Server) Start(ctx context.Context, errch chan error) error {
+	if s.options.serveGRPC {
+		if err := s.serveGRPC(ctx, errch); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Shutdown shuts down the server s. If no server is running, or shutting down
 // results in an error, an error is returned.
-func (s *Server) ShutDown() error {
+func (s *Server) Shutdown() error {
 	var err error
 	if s.server != nil {
 		if s.options.gracePeriod > 0 {
@@ -121,14 +143,20 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
+// Listener returns the listener of Server s
 func (s *Server) Listener() *Listener {
 	return s.listener
 }
 
-func (s *Server) Issuer() *token.Issuer {
+// TokenIssuer returns the token issuer of Server s
+func (s *Server) TokenIssuer() *token.Issuer {
 	return s.issuer
 }
 
 func log() *logrus.Entry {
 	return logrus.WithField("module", "server")
+}
+
+func (s *Server) AuthMethods() *auth.Methods {
+	return s.authMethods
 }

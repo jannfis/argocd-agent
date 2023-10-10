@@ -9,16 +9,17 @@ import (
 	"strings"
 	"time"
 
-	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/auth"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
+	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/authapi"
 	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/versionapi"
-	"github.com/jannfis/argocd-application-agent/server/auth"
-	"github.com/jannfis/argocd-application-agent/server/eventstream"
-	"github.com/jannfis/argocd-application-agent/server/version"
+	"github.com/jannfis/argocd-application-agent/server/apis/auth"
+	"github.com/jannfis/argocd-application-agent/server/apis/eventstream"
+	"github.com/jannfis/argocd-application-agent/server/apis/version"
 )
 
 const listenerRetries = 5
@@ -106,7 +107,7 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 	return err
 }
 
-func (s *Server) ServeGRPC(ctx context.Context, errch chan error) error {
+func (s *Server) serveGRPC(ctx context.Context, errch chan error) error {
 	err := s.Listen(ctx, listenerBackoff)
 	if err != nil {
 		return fmt.Errorf("could not start listener: %w", err)
@@ -114,29 +115,44 @@ func (s *Server) ServeGRPC(ctx context.Context, errch chan error) error {
 
 	s.grpcServer = grpc.NewServer(
 		grpc.ChainStreamInterceptor(
-			grpc_auth.StreamServerInterceptor(func(ctx context.Context) (context.Context, error) {
-				return s.Authenticate(ctx)
-			}),
+			streamRequestLogger(),
+			logging.StreamServerInterceptor(InterceptorLogger(logrus.New()),
+				logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
+			),
+			s.streamAuthInterceptor,
+			// grpc_auth.StreamServerInterceptor(func(ctx context.Context) (context.Context, error) {
+			// 	return s.authenticate(ctx)
+			// }),
+		),
+		grpc.ChainUnaryInterceptor(
+			unaryRequestLogger(),
+			logging.UnaryServerInterceptor(InterceptorLogger(logrus.New()),
+				logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
+			),
+			s.unaryAuthInterceptor,
 		),
 	)
 
 	authapi.RegisterAuthenticationServer(s.grpcServer, auth.NewServer(s.authMethods, s.issuer))
-	versionapi.RegisterVersionServer(s.grpcServer, version.NewServer())
+	versionapi.RegisterVersionServer(s.grpcServer, version.NewServer(s.authenticate))
 	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues))
 
 	// The gRPC server lives in its own go routine
 	go func() {
 		err = s.grpcServer.Serve(s.listener.l)
-		close(s.informerCh)
 		errch <- err
 	}()
 
 	// The application informer lives in its own go routine
-	if s.informer != nil {
-		go func() {
-			s.informer.Start(s.informerCh)
-		}()
-	}
+	// if s.informer != nil {
+	// 	go func() {
+	// 		s.informer.Start(s.informerCh)
+	// 	}()
+	// }
+	go func() {
+		s.backend.StartInformer(ctx)
+	}()
+
 	return nil
 }
 

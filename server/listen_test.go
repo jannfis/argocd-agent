@@ -9,8 +9,12 @@ import (
 	"time"
 
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
+	"github.com/jannfis/argocd-application-agent/internal/auth"
+	"github.com/jannfis/argocd-application-agent/internal/auth/userpass"
 	"github.com/jannfis/argocd-application-agent/internal/version"
+	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/authapi"
 	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/versionapi"
+	"github.com/jannfis/argocd-application-agent/pkg/types"
 	fakecerts "github.com/jannfis/argocd-application-agent/test/fake/certs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -89,44 +93,73 @@ func Test_Listen(t *testing.T) {
 
 }
 
+func grpcDialer(t *testing.T, s *Server) *grpc.ClientConn {
+	t.Helper()
+	tlsC := &tls.Config{InsecureSkipVerify: true}
+	creds := credentials.NewTLS(tlsC)
+	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", s.listener.host, s.listener.port),
+		grpc.WithTransportCredentials(creds))
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	return conn
+}
+
+func userPass(t *testing.T, kv ...string) *userpass.UserPassAuthentication {
+	if len(kv)%2 != 0 {
+		t.Fatalf("kv must have pairs of 2")
+	}
+	up := userpass.NewUserPassAuthentication()
+	for i := 0; i < len(kv); i = i + 2 {
+		up.UpsertUser(kv[i], kv[i+1])
+	}
+
+	return up
+}
+
+func creds(username, password string) auth.Credentials {
+	m := make(map[string]string)
+	m[userpass.ClientIDField] = username
+	m[userpass.ClientSecretField] = password
+	return m
+}
+
 func Test_Serve(t *testing.T) {
 	tempDir := t.TempDir()
 	templ := certTempl
 	fakecerts.WriteFakeRSAKeyPair(t, path.Join(tempDir, "test-cert"), templ)
+
+	// We start a real (non-mocked) server
 	s, err := NewServer(fakeappclient.NewSimpleClientset(), testNamespace,
 		WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 		WithListenerPort(0),
 		WithListenerAddress("127.0.0.1"),
 		WithShutDownGracePeriod(2*time.Second),
+		WithGRPC(true),
 	)
 	require.NoError(t, err)
 	errch := make(chan error)
-	err = s.ServeGRPC(context.Background(), errch)
-	assert.NoError(t, err)
-	ticker := time.NewTicker(500 * time.Millisecond)
-	timeout := time.NewTicker(2 * time.Second)
 
-	for s.server != nil || s.grpcServer != nil {
-		select {
-		case <-ticker.C:
-			tlsC := &tls.Config{InsecureSkipVerify: true}
-			creds := credentials.NewTLS(tlsC)
-			conn, err := grpc.Dial(fmt.Sprintf("%s:%d", s.listener.host, s.listener.port),
-				grpc.WithTransportCredentials(creds))
-			require.NoError(t, err)
-			defer conn.Close()
-			client := versionapi.NewVersionClient(conn)
-			r, err := client.Version(context.Background(), &versionapi.VersionRequest{})
-			require.NoError(t, err)
-			assert.Equal(t, r.Version, version.QualifiedVersion())
-			s.ShutDown()
-			ticker.Stop()
-		case <-timeout.C:
-			t.Fatalf("Timed out waiting for cancel")
-		case err = <-errch:
-			require.NoError(t, err)
-		default:
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
+	err = s.Start(context.Background(), errch)
+	assert.NoError(t, err)
+
+	// Create and register authentication method
+	up := userPass(t, "hello", "world")
+	s.authMethods.RegisterMethod("userpass", up)
+
+	conn := grpcDialer(t, s)
+	defer conn.Close()
+	authC := authapi.NewAuthenticationClient(conn)
+	a, err := authC.Authenticate(
+		context.Background(),
+		&authapi.AuthRequest{Method: "userpass", Credentials: creds("hello", "world")},
+	)
+	require.NoError(t, err)
+	require.Equal(t, a.Result, types.AuthResultOK)
+	versionC := versionapi.NewVersionClient(conn)
+	v, err := versionC.Version(context.Background(), &versionapi.VersionRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, v.Version, version.QualifiedVersion())
+	err = s.Shutdown()
+	assert.NoError(t, err)
 }

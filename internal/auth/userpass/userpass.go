@@ -24,6 +24,9 @@ const ClientSecretField = "clientsecret"
 
 // UserPassAuthentication implements a simple username/password authentication
 // method.
+//
+// UserPassAuthentication does not store passwords in plain, but instead uses
+// the bcrypt hashing algorithm.
 type UserPassAuthentication struct {
 	lock   sync.RWMutex
 	userdb map[string]string
@@ -86,7 +89,18 @@ var clientIDRe = regexp.MustCompile(`^[a-fA-F0-9]{32}$`)
 // We actually support all current bcrypt variants
 var clientSecretRe = regexp.MustCompile(`^\$2[abxy]\$[0-9]{2}.*`)
 
-func (a *UserPassAuthentication) LoadUserDBFromFile(path string) error {
+// LoadAuthDataFromFile loads the authentication data from the file at path.
+// File must contain username/password pairs, where both tokens must be
+// separated by colon. Usernames must be strings of length 32, containing
+// only hexadecimal characters. Passwords must be passwd-style bcrypt hashes
+// and indicate bcrypt version and cost.
+//
+// The file may also contain comments starting with either the '#' or '//'
+// characters. Comments will be ignored.
+//
+// Returns nil on success, or an error indicating why the file couldn't be
+// loaded.
+func (a *UserPassAuthentication) LoadAuthDataFromFile(path string) error {
 	newUserDB := make(map[string]string)
 	f, err := os.Open(path)
 	if err != nil {

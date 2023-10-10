@@ -12,6 +12,8 @@ import (
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
+	"github.com/jannfis/argocd-application-agent/internal/auth/userpass"
+	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/authapi"
 	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/jannfis/argocd-application-agent/server"
 	fakecerts "github.com/jannfis/argocd-application-agent/test/fake/certs"
@@ -35,15 +37,20 @@ var certTempl = x509.Certificate{
 
 var testNamespace = "default"
 
-func newStreamingClient(t *testing.T, s *server.Server) (eventstreamapi.EventStreamClient, *grpc.ClientConn) {
+func newConn(t *testing.T, s *server.Server) *grpc.ClientConn {
 	t.Helper()
 	tlsC := &tls.Config{InsecureSkipVerify: true}
 	creds := credentials.NewTLS(tlsC)
 	conn, err := grpc.Dial(s.Listener().Address(),
 		grpc.WithTransportCredentials(creds))
 	require.NoError(t, err)
-	return eventstreamapi.NewEventStreamClient(conn), conn
+	return conn
 }
+
+// func newStreamingClient(t *testing.T, conn) (eventstreamapi.EventStreamClient, *grpc.ClientConn) {
+// 	t.Helper()
+// 	return eventstreamapi.NewEventStreamClient(conn), conn
+// }
 
 func Test_EndToEnd(t *testing.T) {
 	tempDir := t.TempDir()
@@ -57,23 +64,37 @@ func Test_EndToEnd(t *testing.T) {
 		server.WithListenerPort(0),
 		server.WithListenerAddress("127.0.0.1"),
 		server.WithShutDownGracePeriod(2*time.Second),
+		server.WithGRPC(true),
 	)
 	require.NoError(t, err)
-
-	err = s.ServeGRPC(context.Background(), errch)
+	err = s.Start(context.Background(), errch)
 	assert.NoError(t, err)
 
-	token, err := s.Issuer().Issue("default", 1*time.Minute)
-	require.NoError(t, err)
+	am := userpass.NewUserPassAuthentication()
+	am.UpsertUser("default", "password")
+	s.AuthMethods().RegisterMethod("userpass", am)
+
+	// token, err := s.TokenIssuer().Issue("default", 1*time.Minute)
+	// require.NoError(t, err)
+
+	conn := newConn(t, s)
+	defer conn.Close()
+
+	authC := authapi.NewAuthenticationClient(conn)
+	streamC := eventstreamapi.NewEventStreamClient(conn)
 
 	clientCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	clientCtx = metadata.AppendToOutgoingContext(clientCtx, "authorization", token)
 
-	client, conn := newStreamingClient(t, s)
-	defer conn.Close()
+	// Get authentication token and store in context
+	authr, err := authC.Authenticate(clientCtx, &authapi.AuthRequest{Method: "userpass", Credentials: map[string]string{
+		userpass.ClientIDField:     "default",
+		userpass.ClientSecretField: "password",
+	}})
+	require.NoError(t, err)
+	clientCtx = metadata.AppendToOutgoingContext(clientCtx, "authorization", authr.Token)
 
-	sub, err := client.Subscribe(clientCtx)
+	sub, err := streamC.Subscribe(clientCtx)
 	require.NotNil(t, sub)
 	require.NoError(t, err)
 
@@ -121,7 +142,7 @@ func Test_EndToEnd(t *testing.T) {
 			appsCreated += 1
 		}
 	}
-	s.ShutDown()
+	s.Shutdown()
 }
 
 func log() *logrus.Entry {

@@ -11,7 +11,7 @@ import (
 
 func Test_Version(t *testing.T) {
 	t.Run("Get version identifier", func(t *testing.T) {
-		s := NewServer()
+		s := NewServer(nil)
 		r, err := s.Version(context.Background(), &versionapi.VersionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, version.QualifiedVersion(), r.Version)

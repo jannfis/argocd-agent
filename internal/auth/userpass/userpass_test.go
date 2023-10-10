@@ -90,19 +90,19 @@ func Test_Authenticate(t *testing.T) {
 func Test_LoadUserDB(t *testing.T) {
 	a := NewUserPassAuthentication()
 	t.Run("Load good user DB", func(t *testing.T) {
-		err := a.LoadUserDBFromFile("testdata/userdb-good.txt")
+		err := a.LoadAuthDataFromFile("testdata/userdb-good.txt")
 		assert.NoError(t, err)
 		assert.Len(t, a.userdb, 5)
 	})
 
 	t.Run("Load partial good user DB", func(t *testing.T) {
-		err := a.LoadUserDBFromFile("testdata/userdb-partial.txt")
+		err := a.LoadAuthDataFromFile("testdata/userdb-partial.txt")
 		assert.NoError(t, err)
 		assert.Len(t, a.userdb, 3)
 	})
 
 	t.Run("File not existing", func(t *testing.T) {
-		err := a.LoadUserDBFromFile("testdata/i-do-not-exist.txt")
+		err := a.LoadAuthDataFromFile("testdata/i-do-not-exist.txt")
 		assert.ErrorIs(t, err, os.ErrNotExist)
 		// a.userdb should not have been touched
 		assert.Len(t, a.userdb, 3)

@@ -3,21 +3,23 @@ package server
 import (
 	"context"
 
+	middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2"
 	"github.com/jannfis/argocd-application-agent/pkg/types"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
-// Authenticate is used as a gRPC interceptor to decide whether a request is
-// authenticated or not. If the request is authenticated, Authenticate will
+// authenticate is used as a gRPC interceptor to decide whether a request is
+// authenticated or not. If the request is authenticated, authenticate will
 // also augment the Context of the request with additional information about
 // the client, that can later be evaluated by the server's RPC methods and
 // streams.
 //
-// If the request turns out to be unauthenticated, Authenticate will
+// If the request turns out to be unauthenticated, authenticate will
 // return an appropriate error.
-func (s *Server) Authenticate(ctx context.Context) (context.Context, error) {
+func (s *Server) authenticate(ctx context.Context) (context.Context, error) {
 	logCtx := log().WithField("module", "AuthHandler")
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -48,4 +50,38 @@ func (s *Server) Authenticate(ctx context.Context) (context.Context, error) {
 	}
 	logCtx.WithField("client", agentName).Tracef("Client passed authentication")
 	return authCtx, nil
+}
+
+// unaryAuthInterceptor is a server interceptor for unary gRPC requests.
+//
+// It enforces authentication on incoming gRPC calls according to settings of
+// Server s. If the called method is in the list of unauthenticated endpoints,
+// authentication is skipped.
+func (s *Server) unaryAuthInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	if _, ok := s.noauth[info.FullMethod]; ok {
+		return handler(ctx, req)
+	}
+	newCtx, err := s.authenticate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return handler(newCtx, nil)
+}
+
+// streamAuthInterceptor is a server interceptor for streaming gRPC requests.
+//
+// It enforces authentication on incoming gRPC calls according to settings of
+// Server s. If the called method is in the list of unauthenticated endpoints,
+// authentication is skipped.
+func (s *Server) streamAuthInterceptor(srv any, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	if _, ok := s.noauth[info.FullMethod]; ok {
+		return handler(srv, stream)
+	}
+	newCtx, err := s.authenticate(stream.Context())
+	if err != nil {
+		return err
+	}
+	wrapped := middleware.WrapServerStream(stream)
+	wrapped.WrappedContext = newCtx
+	return handler(srv, wrapped)
 }
