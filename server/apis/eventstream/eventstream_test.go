@@ -8,7 +8,7 @@ import (
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/jannfis/argocd-application-agent/internal/queue"
-	"github.com/jannfis/argocd-application-agent/server/eventstream/mock"
+	"github.com/jannfis/argocd-application-agent/server/apis/eventstream/mock"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
