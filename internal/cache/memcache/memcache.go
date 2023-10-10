@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	"github.com/jannfis/argocd-application-agent/internal/cache"
+	"github.com/jannfis/argocd-agent/internal/cache"
 )
 
 type cacheEntry struct {

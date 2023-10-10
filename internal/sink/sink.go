@@ -1,6 +1,6 @@
 package sink
 
-import "github.com/jannfis/argocd-application-agent/internal/application"
+import "github.com/jannfis/argocd-agent/internal/application"
 
 type SyncStatus int
 

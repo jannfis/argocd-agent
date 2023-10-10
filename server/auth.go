@@ -4,7 +4,7 @@ import (
 	"context"
 
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2"
-	"github.com/jannfis/argocd-application-agent/pkg/types"
+	"github.com/jannfis/argocd-agent/pkg/types"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"

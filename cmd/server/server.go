@@ -1,6 +1,6 @@
 package main
 
-import "github.com/jannfis/argocd-application-agent/server"
+import "github.com/jannfis/argocd-agent/server"
 
 func main() {
 	server.NewServer(nil, "")

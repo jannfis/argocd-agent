@@ -5,8 +5,8 @@ import (
 	"sync/atomic"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/eventstreamapi"
-	"github.com/jannfis/argocd-application-agent/pkg/types"
+	"github.com/jannfis/argocd-agent/pkg/api/grpc/eventstreamapi"
+	"github.com/jannfis/argocd-agent/pkg/types"
 	"google.golang.org/grpc"
 )
 

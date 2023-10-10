@@ -9,7 +9,7 @@ import (
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	fakekube "github.com/jannfis/argocd-application-agent/test/fake/kube"
+	fakekube "github.com/jannfis/argocd-agent/test/fake/kube"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 

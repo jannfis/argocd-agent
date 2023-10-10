@@ -11,12 +11,12 @@ import (
 	"time"
 
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
-	"github.com/jannfis/argocd-application-agent/internal/appinformer"
-	"github.com/jannfis/argocd-application-agent/internal/auth"
-	"github.com/jannfis/argocd-application-agent/internal/queue"
-	"github.com/jannfis/argocd-application-agent/internal/token"
-	"github.com/jannfis/argocd-application-agent/server/backend"
-	"github.com/jannfis/argocd-application-agent/server/backend/kubernetes"
+	"github.com/jannfis/argocd-agent/internal/appinformer"
+	"github.com/jannfis/argocd-agent/internal/auth"
+	"github.com/jannfis/argocd-agent/internal/queue"
+	"github.com/jannfis/argocd-agent/internal/token"
+	"github.com/jannfis/argocd-agent/server/backend"
+	"github.com/jannfis/argocd-agent/server/backend/kubernetes"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )

@@ -14,12 +14,12 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/authapi"
-	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/eventstreamapi"
-	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/versionapi"
-	"github.com/jannfis/argocd-application-agent/server/apis/auth"
-	"github.com/jannfis/argocd-application-agent/server/apis/eventstream"
-	"github.com/jannfis/argocd-application-agent/server/apis/version"
+	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
+	"github.com/jannfis/argocd-agent/pkg/api/grpc/eventstreamapi"
+	"github.com/jannfis/argocd-agent/pkg/api/grpc/versionapi"
+	"github.com/jannfis/argocd-agent/server/apis/auth"
+	"github.com/jannfis/argocd-agent/server/apis/eventstream"
+	"github.com/jannfis/argocd-agent/server/apis/version"
 )
 
 const listenerRetries = 5

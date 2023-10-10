@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jannfis/argocd-application-agent/internal/auth"
-	"github.com/jannfis/argocd-application-agent/internal/auth/userpass"
-	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/authapi"
-	"github.com/jannfis/argocd-application-agent/pkg/types"
+	"github.com/jannfis/argocd-agent/internal/auth"
+	"github.com/jannfis/argocd-agent/internal/auth/userpass"
+	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
+	"github.com/jannfis/argocd-agent/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

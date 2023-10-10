@@ -10,8 +10,8 @@ import (
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
-	"github.com/jannfis/argocd-application-agent/internal/appinformer"
-	"github.com/jannfis/argocd-application-agent/server/backend"
+	"github.com/jannfis/argocd-agent/internal/appinformer"
+	"github.com/jannfis/argocd-agent/server/backend"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

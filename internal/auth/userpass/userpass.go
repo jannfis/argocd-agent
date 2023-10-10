@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/jannfis/argocd-application-agent/internal/auth"
+	"github.com/jannfis/argocd-agent/internal/auth"
 	"github.com/sirupsen/logrus"
 )
 

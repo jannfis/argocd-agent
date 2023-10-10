@@ -9,7 +9,7 @@ import (
 	"time"
 
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
-	fakecerts "github.com/jannfis/argocd-application-agent/test/fake/certs"
+	fakecerts "github.com/jannfis/argocd-agent/test/fake/certs"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

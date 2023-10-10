@@ -3,8 +3,8 @@ package version
 import (
 	"context"
 
-	"github.com/jannfis/argocd-application-agent/internal/version"
-	"github.com/jannfis/argocd-application-agent/pkg/api/grpc/versionapi"
+	"github.com/jannfis/argocd-agent/internal/version"
+	"github.com/jannfis/argocd-agent/pkg/api/grpc/versionapi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

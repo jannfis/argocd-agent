@@ -1,4 +1,4 @@
-module github.com/jannfis/argocd-application-agent
+module github.com/jannfis/argocd-agent
 
 go 1.20
 

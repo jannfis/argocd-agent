@@ -3,8 +3,8 @@ package appinformer
 import (
 	"time"
 
-	"github.com/jannfis/argocd-application-agent/internal/filter"
-	"github.com/jannfis/argocd-application-agent/internal/metrics"
+	"github.com/jannfis/argocd-agent/internal/filter"
+	"github.com/jannfis/argocd-agent/internal/metrics"
 )
 
 // AppInformerOptions is a set of options for the AppInformer.

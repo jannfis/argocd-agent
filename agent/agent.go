@@ -1,12 +1,12 @@
 package agent
 
 import (
-	"github.com/jannfis/argocd-application-agent/internal/appinformer"
-	"github.com/jannfis/argocd-application-agent/internal/batch"
-	"github.com/jannfis/argocd-application-agent/internal/filter"
+	"github.com/jannfis/argocd-agent/internal/appinformer"
+	"github.com/jannfis/argocd-agent/internal/batch"
+	"github.com/jannfis/argocd-agent/internal/filter"
 
-	// "github.com/jannfis/argocd-application-agent/internal/filter"
-	"github.com/jannfis/argocd-application-agent/internal/metrics"
+	// "github.com/jannfis/argocd-agent/internal/filter"
+	"github.com/jannfis/argocd-agent/internal/metrics"
 	log "github.com/sirupsen/logrus"
 
 	"k8s.io/client-go/kubernetes"
