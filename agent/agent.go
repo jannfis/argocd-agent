@@ -2,7 +2,6 @@ package agent
 
 import (
 	"github.com/jannfis/argocd-agent/internal/appinformer"
-	"github.com/jannfis/argocd-agent/internal/batch"
 	"github.com/jannfis/argocd-agent/internal/filter"
 
 	// "github.com/jannfis/argocd-agent/internal/filter"
@@ -31,8 +30,6 @@ type Agent struct {
 	appLister   applisters.ApplicationLister
 
 	informer *appinformer.AppInformer
-
-	appQueue *batch.AutoBatchQueue
 
 	metrics agentMetrics
 
@@ -72,12 +69,6 @@ func NewAgent(client kubernetes.Interface, appclient appclientset.Interface, opt
 
 	// Set up metrics providers
 	a.metrics.app = metrics.NewApplicationWatcherMetrics()
-
-	cbFunc := batch.WithCallbackFunc(func(bq *batch.AutoBatchQueue) {
-		log.Infof("Batch!")
-	})
-
-	a.appQueue = batch.NewAutoBatch(batch.WithBatchSize(1), cbFunc)
 
 	// Set up default filter chain
 	// a.filters = a.DefaultFilterChain()
