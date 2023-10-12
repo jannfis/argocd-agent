@@ -12,10 +12,11 @@ import (
 
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	"github.com/jannfis/argocd-agent/internal/appinformer"
+	"github.com/jannfis/argocd-agent/internal/application"
 	"github.com/jannfis/argocd-agent/internal/auth"
+	"github.com/jannfis/argocd-agent/internal/metrics"
 	"github.com/jannfis/argocd-agent/internal/queue"
 	"github.com/jannfis/argocd-agent/internal/token"
-	"github.com/jannfis/argocd-agent/server/backend"
 	"github.com/jannfis/argocd-agent/server/backend/kubernetes"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -29,12 +30,12 @@ type Server struct {
 	grpcServer  *grpc.Server
 	authMethods *auth.Methods
 	queues      *queue.SendRecvQueues
-	// informer    *appinformer.AppInformer
-	// informerCh chan struct{}
-	namespace string
-	issuer    *token.Issuer
-	noauth    map[string]bool // noauth contains endpoints accessible without authentication
-	backend   backend.Application
+	namespace   string
+	issuer      *token.Issuer
+	noauth      map[string]bool // noauth contains endpoints accessible without authentication
+	ctx         context.Context
+	ctxCancel   context.CancelFunc
+	appManager  *application.Manager
 }
 
 func NewServer(appClient appclientset.Interface, namespace string, opts ...ServerOption) (*Server, error) {
@@ -74,13 +75,28 @@ func NewServer(appClient appclientset.Interface, namespace string, opts ...Serve
 		},
 	}
 
-	informer := appinformer.NewAppInformer(appClient,
-		s.namespace,
+	informerOpts := []appinformer.AppInformerOption{
 		appinformer.WithNamespaces(options.namespaces...),
 		appinformer.WithNewAppCallback(s.newAppCallback),
+	}
+
+	managerOpts := []application.ManagerOption{
+		application.WithAllowUpsert(true),
+	}
+
+	if s.options.metricsPort > 0 {
+		informerOpts = append(informerOpts, appinformer.WithMetrics(metrics.NewApplicationWatcherMetrics()))
+		managerOpts = append(managerOpts, application.WithMetrics(metrics.NewApplicationClientMetrics()))
+	}
+
+	informer := appinformer.NewAppInformer(appClient,
+		s.namespace,
+		informerOpts...,
 	)
 
-	s.backend = kubernetes.NewKubernetesBackend(appClient, informer)
+	s.appManager = application.NewManager(kubernetes.NewKubernetesBackend(appClient, informer),
+		managerOpts...,
+	)
 
 	return s, nil
 }
@@ -89,10 +105,20 @@ func NewServer(appClient appclientset.Interface, namespace string, opts ...Serve
 // error during startup, before the go routines are running, will be returned
 // immediately. Errors during the runtime will be propagated via errch.
 func (s *Server) Start(ctx context.Context, errch chan error) error {
+	s.ctx, s.ctxCancel = context.WithCancel(ctx)
 	if s.options.serveGRPC {
-		if err := s.serveGRPC(ctx, errch); err != nil {
+		if err := s.serveGRPC(s.ctx, errch); err != nil {
 			return err
 		}
+	}
+
+	if s.options.metricsPort > 0 {
+		metrics.StartMetricsServer(metrics.WithListener("", s.options.metricsPort))
+	}
+
+	err := s.StartEventProcessor(s.ctx)
+	if err != nil {
+		return nil
 	}
 
 	return nil
@@ -102,6 +128,9 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 // results in an error, an error is returned.
 func (s *Server) Shutdown() error {
 	var err error
+	// Cancel server-wide context
+	s.ctxCancel()
+
 	if s.server != nil {
 		if s.options.gracePeriod > 0 {
 			ctx, cancel := context.WithTimeout(context.Background(), s.options.gracePeriod)
@@ -159,4 +188,12 @@ func log() *logrus.Entry {
 
 func (s *Server) AuthMethods() *auth.Methods {
 	return s.authMethods
+}
+
+func (s *Server) Queues() *queue.SendRecvQueues {
+	return s.queues
+}
+
+func (s *Server) AppManager() *application.Manager {
+	return s.appManager
 }

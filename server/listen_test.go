@@ -64,7 +64,7 @@ func Test_parseAddress(t *testing.T) {
 func Test_Listen(t *testing.T) {
 	tempDir := t.TempDir()
 	templ := certTempl
-	fakecerts.WriteFakeRSAKeyPair(t, path.Join(tempDir, "test-cert"), templ)
+	fakecerts.WriteSelfSignedCert(t, path.Join(tempDir, "test-cert"), templ)
 	t.Run("Auto-select port for listener", func(t *testing.T) {
 		s, err := NewServer(fakeappclient.NewSimpleClientset(), testNamespace,
 			WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
@@ -127,7 +127,7 @@ func creds(username, password string) auth.Credentials {
 func Test_Serve(t *testing.T) {
 	tempDir := t.TempDir()
 	templ := certTempl
-	fakecerts.WriteFakeRSAKeyPair(t, path.Join(tempDir, "test-cert"), templ)
+	fakecerts.WriteSelfSignedCert(t, path.Join(tempDir, "test-cert"), templ)
 
 	// We start a real (non-mocked) server
 	s, err := NewServer(fakeappclient.NewSimpleClientset(), testNamespace,

@@ -6,56 +6,84 @@ import (
 	// "github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// ApplicationMetrics holds metrics about Applications watched by the agent
-type ApplicationMetrics struct {
-	appsWatched prometheus.Gauge
-	appsAdded   prometheus.Counter
-	appsUpdated prometheus.Counter
-	appsRemoved prometheus.Counter
-	errors      prometheus.Counter
+// ApplicationWatcherMetrics holds metrics about Applications watched by the agent
+type ApplicationWatcherMetrics struct {
+	AppsWatched prometheus.Gauge
+	AppsAdded   prometheus.Counter
+	AppsUpdated prometheus.Counter
+	AppsRemoved prometheus.Counter
+	Errors      prometheus.Counter
 }
 
-// NewApplicationMetrics returns a new instance of ApplicationMetrics
-func NewApplicationMetrics() *ApplicationMetrics {
-	am := &ApplicationMetrics{
-		appsWatched: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "argocd_agent_applications_watched",
+type ApplicationClientMetrics struct {
+	AppsCreated *prometheus.CounterVec
+	AppsUpdated *prometheus.CounterVec
+	AppsDeleted *prometheus.CounterVec
+	Errors      prometheus.Counter
+}
+
+// NewApplicationWatcherMetrics returns a new instance of ApplicationMetrics
+func NewApplicationWatcherMetrics() *ApplicationWatcherMetrics {
+	am := &ApplicationWatcherMetrics{
+		AppsWatched: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "argocd_agent_watcher_applications_watched",
 			Help: "The total number of apps watched by the agent",
 		}),
-		appsAdded: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "argocd_agent_applications_added",
+		AppsAdded: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "argocd_agent_watcher_applications_added",
 			Help: "The number of applicatins that have been added to the agent",
 		}),
-		appsUpdated: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "argocd_agent_applications_updated",
+		AppsUpdated: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "argocd_agent_watcher_applications_updated",
 			Help: "The number of applications that have been updated",
 		}),
-		appsRemoved: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "argocd_agent_applications_removed",
+		AppsRemoved: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "argocd_agent_watcher_applications_removed",
 			Help: "The number of applications that have been removed from the agent",
 		}),
 	}
 	return am
 }
 
-func (am *ApplicationMetrics) SetWatched(num int64) {
-	am.appsWatched.Set(float64(num))
+func NewApplicationClientMetrics() *ApplicationClientMetrics {
+	return &ApplicationClientMetrics{
+		AppsCreated: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_agent_client_applications_created",
+			Help: "The total number of applications created by the application client",
+		}, []string{"namespace"}),
+		AppsUpdated: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_agent_client_applications_updated",
+			Help: "The total number of applications updated by the application client",
+		}, []string{"namespace"}),
+		AppsDeleted: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_agent_client_applications_deleted",
+			Help: "The total number of applications deleted by the application client",
+		}, []string{"namespace"}),
+		Errors: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "argocd_agent_client_applications_errors",
+			Help: "The total number of applications deleted by the application client",
+		}),
+	}
 }
 
-func (am *ApplicationMetrics) AddApp() {
-	am.appsWatched.Inc()
-	am.appsAdded.Inc()
-}
+// func (am *ApplicationWatcherMetrics) SetWatched(num int64) {
+// 	am.AppsWatched.Set(float64(num))
+// }
 
-func (am *ApplicationMetrics) RemoveApp() {
-	am.appsWatched.Dec()
-	am.appsRemoved.Inc()
-}
+// func (am *ApplicationWatcherMetrics) AppAdded() {
+// 	am.AppsWatched.Inc()
+// 	am.AppsAdded.Inc()
+// }
 
-func (am *ApplicationMetrics) UpdateApp() {
-	am.appsUpdated.Inc()
-}
+// func (am *ApplicationWatcherMetrics) AppRemoved() {
+// 	am.AppsWatched.Dec()
+// 	am.AppsRemoved.Inc()
+// }
 
-func (am *ApplicationMetrics) Error() {
-	am.errors.Inc()
-}
+// func (am *ApplicationWatcherMetrics) AppUpdated() {
+// 	am.AppsUpdated.Inc()
+// }
+
+// func (am *ApplicationWatcherMetrics) Error() {
+// 	am.Errors.Inc()
+// }

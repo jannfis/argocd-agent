@@ -18,7 +18,7 @@ import (
 )
 
 type agentMetrics struct {
-	app *metrics.ApplicationMetrics
+	app *metrics.ApplicationWatcherMetrics
 }
 
 // Agent is a controller that synchronizes Application resources
@@ -71,7 +71,7 @@ func NewAgent(client kubernetes.Interface, appclient appclientset.Interface, opt
 	// a.appLister = applisters.NewApplicationLister(a.appInformer.GetIndexer())
 
 	// Set up metrics providers
-	a.metrics.app = metrics.NewApplicationMetrics()
+	a.metrics.app = metrics.NewApplicationWatcherMetrics()
 
 	cbFunc := batch.WithCallbackFunc(func(bq *batch.AutoBatchQueue) {
 		log.Infof("Batch!")

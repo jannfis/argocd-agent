@@ -144,13 +144,8 @@ func (s *Server) serveGRPC(ctx context.Context, errch chan error) error {
 	}()
 
 	// The application informer lives in its own go routine
-	// if s.informer != nil {
-	// 	go func() {
-	// 		s.informer.Start(s.informerCh)
-	// 	}()
-	// }
 	go func() {
-		s.backend.StartInformer(ctx)
+		s.appManager.Backend.StartInformer(ctx)
 	}()
 
 	return nil

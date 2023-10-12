@@ -30,7 +30,7 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Run("Valid TLS key pair", func(t *testing.T) {
 		templ := certTempl
-		fakecerts.WriteFakeRSAKeyPair(t, path.Join(tempDir, "test-cert"), templ)
+		fakecerts.WriteSelfSignedCert(t, path.Join(tempDir, "test-cert"), templ)
 		s, err := NewServer(fakeappclient.NewSimpleClientset(), testNamespace,
 			WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")))
 		require.NoError(t, err)

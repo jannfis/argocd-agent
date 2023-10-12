@@ -47,7 +47,6 @@ func StartMetricsServer(opts ...MetricsServerOption) chan error {
 		sm := http.NewServeMux()
 		sm.Handle("/metrics", promhttp.Handler())
 		errCh <- http.ListenAndServe(listener(config), sm)
-
 	}()
 	return errCh
 }

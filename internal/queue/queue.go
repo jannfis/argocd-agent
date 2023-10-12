@@ -25,6 +25,20 @@ func NewSendRecvQueues() *SendRecvQueues {
 	}
 }
 
+// Names returns the names of all currently existing queues.
+func (q *SendRecvQueues) Names() []string {
+	// TODO(jannfis): This is a potentially expensive operation at O(n), and
+	// it keeps a read lock on the queues at all times. We might want to find
+	// a better way, potentially at the expense of memory.
+	q.queuelock.RLock()
+	defer q.queuelock.RUnlock()
+	names := make([]string, 0, len(q.queues))
+	for k := range q.queues {
+		names = append(names, k)
+	}
+	return names
+}
+
 // HasQueuePair retruns true if a queue pair with name currently exists
 func (q *SendRecvQueues) HasQueuePair(name string) bool {
 	q.queuelock.RLock()

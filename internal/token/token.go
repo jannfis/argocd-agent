@@ -43,7 +43,7 @@ func WithPrivateRSAKeyFromFile(path string) IssuerOption {
 		}
 		key, err := x509.ParsePKCS1PrivateKey(p.Bytes)
 		if err != nil {
-			return fmt.Errorf("could not parse RSA private key data from %s: %w", path, err)
+			return fmt.Errorf("no RSA private key in %s: %w", path, err)
 		}
 		i.privateKey = key
 		return nil

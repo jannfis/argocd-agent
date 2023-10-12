@@ -16,6 +16,7 @@ import (
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/jannfis/argocd-agent/server"
+	"github.com/jannfis/argocd-agent/server/backend"
 	fakecerts "github.com/jannfis/argocd-agent/test/fake/certs"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -37,26 +38,11 @@ var certTempl = x509.Certificate{
 
 var testNamespace = "default"
 
-func newConn(t *testing.T, s *server.Server) *grpc.ClientConn {
+func newConn(t *testing.T, appC *fakeappclient.Clientset) (*grpc.ClientConn, *server.Server) {
 	t.Helper()
-	tlsC := &tls.Config{InsecureSkipVerify: true}
-	creds := credentials.NewTLS(tlsC)
-	conn, err := grpc.Dial(s.Listener().Address(),
-		grpc.WithTransportCredentials(creds))
-	require.NoError(t, err)
-	return conn
-}
-
-// func newStreamingClient(t *testing.T, conn) (eventstreamapi.EventStreamClient, *grpc.ClientConn) {
-// 	t.Helper()
-// 	return eventstreamapi.NewEventStreamClient(conn), conn
-// }
-
-func Test_EndToEnd(t *testing.T) {
 	tempDir := t.TempDir()
 	templ := certTempl
-	fakecerts.WriteFakeRSAKeyPair(t, path.Join(tempDir, "test-cert"), templ)
-	appC := fakeappclient.NewSimpleClientset()
+	fakecerts.WriteSelfSignedCert(t, path.Join(tempDir, "test-cert"), templ)
 	errch := make(chan error)
 
 	s, err := server.NewServer(appC, testNamespace,
@@ -65,6 +51,7 @@ func Test_EndToEnd(t *testing.T) {
 		server.WithListenerAddress("127.0.0.1"),
 		server.WithShutDownGracePeriod(2*time.Second),
 		server.WithGRPC(true),
+		server.WithEventProcessors(10),
 	)
 	require.NoError(t, err)
 	err = s.Start(context.Background(), errch)
@@ -74,16 +61,31 @@ func Test_EndToEnd(t *testing.T) {
 	am.UpsertUser("default", "password")
 	s.AuthMethods().RegisterMethod("userpass", am)
 
+	tlsC := &tls.Config{InsecureSkipVerify: true}
+	creds := credentials.NewTLS(tlsC)
+	conn, err := grpc.Dial(s.Listener().Address(),
+		grpc.WithTransportCredentials(creds))
+	require.NoError(t, err)
+	return conn, s
+}
+
+// func newStreamingClient(t *testing.T, conn) (eventstreamapi.EventStreamClient, *grpc.ClientConn) {
+// 	t.Helper()
+// 	return eventstreamapi.NewEventStreamClient(conn), conn
+// }
+
+func Test_EndToEnd_Subscribe(t *testing.T) {
 	// token, err := s.TokenIssuer().Issue("default", 1*time.Minute)
 	// require.NoError(t, err)
 
-	conn := newConn(t, s)
+	appC := fakeappclient.NewSimpleClientset()
+	conn, s := newConn(t, appC)
 	defer conn.Close()
 
 	authC := authapi.NewAuthenticationClient(conn)
-	streamC := eventstreamapi.NewEventStreamClient(conn)
+	eventC := eventstreamapi.NewEventStreamClient(conn)
 
-	clientCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	clientCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	// Get authentication token and store in context
@@ -94,7 +96,7 @@ func Test_EndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	clientCtx = metadata.AppendToOutgoingContext(clientCtx, "authorization", authr.Token)
 
-	sub, err := streamC.Subscribe(clientCtx)
+	sub, err := eventC.Subscribe(clientCtx)
 	require.NotNil(t, sub)
 	require.NoError(t, err)
 
@@ -145,6 +147,62 @@ func Test_EndToEnd(t *testing.T) {
 	s.Shutdown()
 }
 
+func Test_EndToEnd_Push(t *testing.T) {
+	appC := fakeappclient.NewSimpleClientset()
+	conn, s := newConn(t, appC)
+	defer conn.Close()
+	authC := authapi.NewAuthenticationClient(conn)
+	eventC := eventstreamapi.NewEventStreamClient(conn)
+
+	clientCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Get authentication token and store in context
+	authr, err := authC.Authenticate(clientCtx, &authapi.AuthRequest{Method: "userpass", Credentials: map[string]string{
+		userpass.ClientIDField:     "default",
+		userpass.ClientSecretField: "password",
+	}})
+	require.NoError(t, err)
+	clientCtx = metadata.AppendToOutgoingContext(clientCtx, "authorization", authr.Token)
+
+	pushc, err := eventC.Push(clientCtx)
+	require.NoError(t, err)
+	start := time.Now()
+	for i := 0; i < 10; i += 1 {
+		pushc.Send(&eventstreamapi.Event{
+			Event: eventstreamapi.EventType_Event_UpdateApp,
+			Application: &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{
+				Name:      fmt.Sprintf("test%d", i),
+				Namespace: "default",
+			}},
+		})
+	}
+	summary, err := pushc.CloseAndRecv()
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+	assert.Equal(t, int32(10), summary.Received)
+	end := time.Now()
+
+	// Wait until the context is done
+	<-clientCtx.Done()
+
+	log().Infof("Took %v to process", end.Sub(start))
+	s.Shutdown()
+
+	// Should have been grabbed by queue processor
+	q := s.Queues()
+	assert.Equal(t, 0, q.RecvQ("default").Len())
+
+	// All applications should have been created by now on the server
+	apps, err := s.AppManager().Backend.List(context.Background(), backend.ApplicationSelector{})
+	assert.NoError(t, err)
+	assert.Len(t, apps, 10)
+}
+
 func log() *logrus.Entry {
-	return logrus.NewEntry(logrus.StandardLogger())
+	return logrus.WithField("TEST", "test")
+}
+
+func init() {
+	logrus.SetLevel(logrus.TraceLevel)
 }

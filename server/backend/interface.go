@@ -18,6 +18,7 @@ type ApplicationSelector struct {
 
 type Application interface {
 	List(ctx context.Context, selector ApplicationSelector) ([]v1alpha1.Application, error)
+	Create(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error)
 	Get(ctx context.Context, name string, namespace string) (*v1alpha1.Application, error)
 	Delete(ctx context.Context, name string, namespace string) error
 	Update(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error)

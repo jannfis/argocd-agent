@@ -28,15 +28,21 @@ The following paragraphs describe the design principles upon which `argocd-agent
 
 ### A permanent network connection is neither expected nor required
 
-It is understood that managed clusters can be everywhere: In your black-fibre connected data centres, across different cloud providers, in a car 
+It is understood that managed clusters can be everywhere: In your black-fibre connected data centres, across different cloud providers, in a car, on a ship, wherever. Not all these locations will have a permanent, reliable and low-latency network connection.
+
+Thus, `argocd-agent` is designed around the assumption that managed clusters are not always available, and might have problems keeping up a stable network connection.
 
 ### Managed clusters are and will stay autonomous
 
-The agent does not interfere with or augment the reconciliation process and it isn't required for the core functionality of Argo CD. 
+When the agent cannot reach the control plane, the agent's cluster still is able to perform its operations in an autonomous way. Depending on the agent's mode of operation (see [Architecture](#Architecture) above), cluster admins may still be able to configure applications.
+
 ### The initiating component is always the agent, not the control plane
 
-Connections are established in one direction only: from the agent to the control plane.
+Connections are established in one direction only: from the agent to the control plane. 
 
+### Security
+
+The control plane component of `argocd-agent` provides a gRPC API over HTTPS/2. The connections to the API require mutual TLS and strong authentication. The agent won't need access to the control plane's Kubernetes API, and the control plane component has limited capabilities on the cluster it is running in.
 
 ## Status and current limitations
 

@@ -15,19 +15,22 @@ var supportedTLSVersion map[string]int = map[string]int{
 }
 
 type ServerOptions struct {
-	serverName    string
-	port          int
-	address       string
-	tlsCert       string
-	tlsKey        string
-	tlsCiphers    *tls.CipherSuite
-	tlsMinVersion int
-	gracePeriod   time.Duration
-	namespaces    []string
-	signingKey    *rsa.PrivateKey
-	unauthMethods map[string]bool
-	serveGRPC     bool
-	serveREST     bool
+	serverName      string
+	port            int
+	address         string
+	tlsCert         string
+	tlsKey          string
+	tlsCiphers      *tls.CipherSuite
+	tlsMinVersion   int
+	gracePeriod     time.Duration
+	namespaces      []string
+	signingKey      *rsa.PrivateKey
+	unauthMethods   map[string]bool
+	serveGRPC       bool
+	serveREST       bool
+	eventProcessors int64
+	metricsEnabled  bool
+	metricsPort     int
 }
 
 type ServerOption func(o *ServerOptions) error
@@ -35,10 +38,20 @@ type ServerOption func(o *ServerOptions) error
 // defaultOptions returns a set of default options for the server
 func defaultOptions() *ServerOptions {
 	return &ServerOptions{
-		port:          443,
-		address:       "",
-		tlsMinVersion: tls.VersionTLS13,
-		unauthMethods: make(map[string]bool),
+		port:            443,
+		address:         "",
+		tlsMinVersion:   tls.VersionTLS13,
+		unauthMethods:   make(map[string]bool),
+		eventProcessors: 10,
+	}
+}
+
+// WithEventProcessors sets the maximum number of event processors to run
+// concurrently.
+func WithEventProcessors(numProcessors int64) ServerOption {
+	return func(o *ServerOptions) error {
+		o.eventProcessors = numProcessors
+		return nil
 	}
 }
 
@@ -145,6 +158,13 @@ func WithREST(serveREST bool) ServerOption {
 func WithServerName(serverName string) ServerOption {
 	return func(o *ServerOptions) error {
 		o.serverName = serverName
+		return nil
+	}
+}
+
+func WithMetricsPort(port int) ServerOption {
+	return func(o *ServerOptions) error {
+		o.metricsPort = port
 		return nil
 	}
 }

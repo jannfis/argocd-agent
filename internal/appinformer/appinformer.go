@@ -115,6 +115,10 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 					appList.Items = newItems
 				}
 
+				if i.options.appMetrics != nil {
+					i.options.appMetrics.AppsWatched.Set(float64(len(appList.Items)))
+				}
+
 				return appList, err
 			},
 			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
@@ -150,7 +154,8 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 					i.options.newCb(app)
 				}
 				if i.options.appMetrics != nil {
-					i.options.appMetrics.AddApp()
+					i.options.appMetrics.AppsAdded.Inc()
+					i.options.appMetrics.AppsWatched.Inc()
 				}
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
@@ -186,7 +191,7 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 					i.options.updateCb(oldApp, newApp)
 				}
 				if i.options.appMetrics != nil {
-					i.options.appMetrics.UpdateApp()
+					i.options.appMetrics.AppsUpdated.Inc()
 				}
 			},
 			DeleteFunc: func(obj interface{}) {
@@ -208,7 +213,8 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 					i.options.deleteCb(app)
 				}
 				if i.options.appMetrics != nil {
-					i.options.appMetrics.RemoveApp()
+					i.options.appMetrics.AppsRemoved.Inc()
+					i.options.appMetrics.AppsWatched.Dec()
 				}
 			},
 		},

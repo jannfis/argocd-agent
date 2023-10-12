@@ -10,9 +10,9 @@ import (
 	"testing"
 )
 
-// CreateFakeRSAKeyPair is a test helper that creates a self-signed certificate
+// CreateSelfSignedCert is a test helper that creates a self-signed certificate
 // from a template and returns the PEM encoded certificate and key.
-func CreateFakeRSAKeyPair(t *testing.T, template x509.Certificate) (certBytes []byte, keyBytes []byte) {
+func CreateSelfSignedCert(t *testing.T, template x509.Certificate) (certBytes []byte, keyBytes []byte) {
 	t.Helper()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -34,12 +34,12 @@ func CreateFakeRSAKeyPair(t *testing.T, template x509.Certificate) (certBytes []
 	return certPem.Bytes(), keyPem.Bytes()
 }
 
-// WriteFakeRSAKeyPair is a test helper to write a self-signed certificate, as
+// WriteSelfSignedCert is a test helper to write a self-signed certificate, as
 // defined by templ, and its corresponding key in PEM formats to files suffixed
 // by ".crt" and ".key" respectively to the path specified by basePath.
-func WriteFakeRSAKeyPair(t *testing.T, basePath string, templ x509.Certificate) {
+func WriteSelfSignedCert(t *testing.T, basePath string, templ x509.Certificate) {
 	t.Helper()
-	certBytes, keyBytes := CreateFakeRSAKeyPair(t, templ)
+	certBytes, keyBytes := CreateSelfSignedCert(t, templ)
 	certFile := basePath + ".crt"
 	keyFile := basePath + ".key"
 	err := os.WriteFile(certFile, certBytes, 0644)
@@ -49,5 +49,23 @@ func WriteFakeRSAKeyPair(t *testing.T, basePath string, templ x509.Certificate) 
 	err = os.WriteFile(keyFile, keyBytes, 0600)
 	if err != nil {
 		t.Fatalf("error writing keyfile: %v", err)
+	}
+}
+
+func WriteRSAPrivateKey(t *testing.T, path string) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("error generate key: %v", err)
+	}
+
+	var keyPem bytes.Buffer
+	err = pem.Encode(&keyPem, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	if err != nil {
+		t.Fatalf("error encoding key: %v", err)
+	}
+	err = os.WriteFile(path, keyPem.Bytes(), 0600)
+	if err != nil {
+		t.Fatalf("error writing key: %v", err)
 	}
 }

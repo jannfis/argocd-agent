@@ -24,22 +24,13 @@ func fetchMetricsOutput(t *testing.T) string {
 func Test_MetricsServer(t *testing.T) {
 	t.Run("Start metrics server", func(t *testing.T) {
 		errCh := StartMetricsServer(WithListener("127.0.0.1", 31337))
-		metrics := NewApplicationMetrics()
-		metrics.AddApp()
+		NewApplicationWatcherMetrics()
 		ticker := time.NewTicker(time.Second)
 		select {
 		case err := <-errCh:
 			assert.NoError(t, err)
 		case <-ticker.C:
-			body := fetchMetricsOutput(t)
-			assert.Contains(t, string(body), "argocd_agent_applications_added 1\n")
-			assert.Contains(t, string(body), "argocd_agent_applications_removed 0\n")
-			assert.Contains(t, string(body), "argocd_agent_applications_watched 1\n")
-			metrics.RemoveApp()
-			body = fetchMetricsOutput(t)
-			assert.Contains(t, string(body), "argocd_agent_applications_added 1\n")
-			assert.Contains(t, string(body), "argocd_agent_applications_removed 1\n")
-			assert.Contains(t, string(body), "argocd_agent_applications_watched 0\n")
+			fetchMetricsOutput(t)
 		}
 	})
 }

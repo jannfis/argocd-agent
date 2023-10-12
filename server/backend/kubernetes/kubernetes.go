@@ -19,14 +19,14 @@ var _ backend.Application = &KubernetesBackend{}
 
 type KubernetesBackend struct {
 	appClient appclientset.Interface
-	informer  appinformer.AppInformer
+	informer  *appinformer.AppInformer
 	namespace string
 }
 
 func NewKubernetesBackend(appClient appclientset.Interface, informer *appinformer.AppInformer) *KubernetesBackend {
 	return &KubernetesBackend{
 		appClient: appClient,
-		informer:  *informer,
+		informer:  informer,
 	}
 }
 
@@ -48,6 +48,10 @@ func (be *KubernetesBackend) List(ctx context.Context, selector backend.Applicat
 		res = append(res, l.Items...)
 	}
 	return res, nil
+}
+
+func (be *KubernetesBackend) Create(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error) {
+	return be.appClient.ArgoprojV1alpha1().Applications(app.Namespace).Create(ctx, app, v1.CreateOptions{})
 }
 
 func (be *KubernetesBackend) Get(ctx context.Context, name string, namespace string) (*v1alpha1.Application, error) {

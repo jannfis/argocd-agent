@@ -27,6 +27,8 @@ message Event {
 
 message PushSummary {
     string result = 1;
+    int32 received = 2;
+    int32 processed = 3;
 }
 
 service EventStream {

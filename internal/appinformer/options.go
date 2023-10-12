@@ -14,7 +14,7 @@ import (
 type AppInformerOptions struct {
 	namespace  string
 	namespaces []string
-	appMetrics *metrics.ApplicationMetrics
+	appMetrics *metrics.ApplicationWatcherMetrics
 	filters    *filter.Chain
 	resync     time.Duration
 	listCb     ListAppsCallback
@@ -27,7 +27,7 @@ type AppInformerOptions struct {
 type AppInformerOption func(o *AppInformerOptions)
 
 // WithMetrics sets the ApplicationMetrics instance to be used by the AppInformer
-func WithMetrics(m *metrics.ApplicationMetrics) AppInformerOption {
+func WithMetrics(m *metrics.ApplicationWatcherMetrics) AppInformerOption {
 	return func(o *AppInformerOptions) {
 		o.appMetrics = m
 	}

@@ -1,10 +1,13 @@
 package eventstream
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/jannfis/argocd-agent/internal/event"
 	"github.com/jannfis/argocd-agent/internal/queue"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/jannfis/argocd-agent/pkg/types"
@@ -21,32 +24,20 @@ type server struct {
 }
 
 type ServerOptions struct {
-	// recvQueue map[string]workqueue.RateLimitingInterface
-	// sendQueue map[string]workqueue.RateLimitingInterface
+	MaxStreamDuration time.Duration
 }
 
 type ServerOption func(o *ServerOptions)
 
-// WithRecvQueue sets the receive queue for this server. The server will put
-// all updates it receives from the client stream into this queue for further
-// processing outside of this package.
-// func WithRecvQueue(q map[string]workqueue.RateLimitingInterface) ServerOption {
-// 	return func(o *ServerOptions) {
-// 		o.recvQueue = q
-// 	}
-// }
-
-// WithSendQueue sets the send queue for this server. The send queue holds all
-// items that the server should stream to the client.
-// func WithSendQueue(q map[string]workqueue.RateLimitingInterface) ServerOption {
-// 	return func(o *ServerOptions) {
-// 		o.sendQueue = q
-// 	}
-// }
+func WithMaxStreamDuration(d time.Duration) ServerOption {
+	return func(o *ServerOptions) {
+		o.MaxStreamDuration = d
+	}
+}
 
 // NewServer returns a new AppStream server instance with the given options
 func NewServer(queues *queue.SendRecvQueues, opts ...ServerOption) *server {
-	options := &ServerOptions{}
+	options := &ServerOptions{MaxStreamDuration: 500 * time.Millisecond}
 	for _, o := range opts {
 		o(options)
 	}
@@ -56,20 +47,51 @@ func NewServer(queues *queue.SendRecvQueues, opts ...ServerOption) *server {
 	}
 }
 
+// agentName gets the agent name from the context ctx. If no agent identifier
+// could be found in the context, returns an error.
+func agentName(ctx context.Context) (string, error) {
+	agentName, ok := ctx.Value(types.ContextAgentIdentifier).(string)
+	if !ok {
+		return "", fmt.Errorf("invalid context: no agent name")
+	}
+	return agentName, nil
+}
+
+func (s *server) recvSubscription(ctx context.Context, agentName string, subs eventstreamapi.EventStream_SubscribeServer) (cancel bool, err error) {
+	for {
+		u, err := subs.Recv()
+		if err != nil {
+			return true, err
+		}
+		q := s.queues.RecvQ(agentName)
+		if q == nil {
+			return true, nil
+		}
+
+		q.Add(u.Application)
+	}
+}
+
 // Subscribe implements a bi-directional stream to exchange application updates
 // between the agent and the server.
 //
 // The connection is kept open until the agent closes it, and the stream tries
 // to send updates to the agent as long as possible.
-func (s *server) Subscribe(sc eventstreamapi.EventStream_SubscribeServer) error {
-	recvWaitC := make(chan struct{})
-	sendWaitC := make(chan struct{})
-
+func (s *server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) error {
 	logCtx := log().WithField("method", "Subscribe")
 
-	agentName, ok := sc.Context().Value(types.ContextAgentIdentifier).(string)
-	if !ok {
-		return fmt.Errorf("cannot process connection: invalid context: no agent name")
+	var ctx context.Context
+	var cancelFn context.CancelFunc
+	if s.options.MaxStreamDuration > 0 {
+		ctx, cancelFn = context.WithTimeout(subs.Context(), s.options.MaxStreamDuration)
+	} else {
+		ctx, cancelFn = context.WithCancel(subs.Context())
+	}
+	defer cancelFn()
+
+	agentName, err := agentName(ctx)
+	if err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	logCtx = logCtx.WithField("client", agentName)
@@ -80,51 +102,48 @@ func (s *server) Subscribe(sc eventstreamapi.EventStream_SubscribeServer) error 
 		logCtx := logCtx.WithField("direction", "recv")
 		for {
 			logCtx.Tracef("Waiting to receive from channel")
-			u, err := sc.Recv()
-			if err == io.EOF {
-				logCtx.Tracef("Remote end hung up")
-				close(recvWaitC)
-				return
-			}
-			// TODO: How to handle non-EOF errors?
+			u, err := subs.Recv()
 			if err != nil {
-				st, ok := status.FromError(err)
-				if !ok || (st.Code() != codes.DeadlineExceeded && st.Code() != codes.Canceled) {
-					logCtx.WithError(err).Error("Error receiving application update")
+				if err == io.EOF {
+					logCtx.Tracef("Remote end hung up")
+				} else {
+					st, ok := status.FromError(err)
+					if !ok || (st.Code() != codes.DeadlineExceeded && st.Code() != codes.Canceled) {
+						logCtx.WithError(err).Error("Error receiving application update")
+					}
 				}
-				close(recvWaitC)
+				cancelFn()
 				return
 			}
 			logCtx.Infof("Received update for application %v (%p)", u.Application.QualifiedName(), u.Application)
 			q := s.queues.RecvQ(agentName)
 			if q == nil {
 				logCtx.Warnf("I have no receive queue for agent")
-				close(recvWaitC)
+				cancelFn()
 				return
 			}
-			q.Add(u.Application)
+
+			ev := &event.Event{
+				Type:        event.EventType(u.Event),
+				Application: u.Application,
+			}
+
+			q.Add(ev)
 		}
 	}()
-
 	// We send events in a dedicated go routine
 	go func() {
 		logCtx := logCtx.WithField("direction", "send")
 		logCtx.Tracef("Starting go routine in sending direction")
 		for {
 			select {
-			case <-recvWaitC:
-				logCtx.Info("Shutdown requested")
-				close(sendWaitC)
-				return
-			case <-sc.Context().Done():
+			case <-ctx.Done():
 				logCtx.Info("Context canceled")
-				close(sendWaitC)
 				return
 			default:
 				q := s.queues.SendQ(agentName)
 				if q == nil {
 					logCtx.Warnf("I have no send queue for agent")
-					close(sendWaitC)
 					return
 				}
 				// Get() is blocking until there is at least one item in the
@@ -133,7 +152,6 @@ func (s *server) Subscribe(sc eventstreamapi.EventStream_SubscribeServer) error 
 				item, shutdown := q.Get()
 				if shutdown {
 					logCtx.Tracef("Queue shutdown in progress")
-					close(sendWaitC)
 					return
 				}
 				logCtx.Tracef("Grabbed an item")
@@ -148,23 +166,92 @@ func (s *server) Subscribe(sc eventstreamapi.EventStream_SubscribeServer) error 
 				}
 
 				// A Send() on the stream is actually not blocking.
-				err := sc.Send(&eventstreamapi.Event{Application: app.DeepCopy()})
+				err := subs.Send(&eventstreamapi.Event{Application: app.DeepCopy()})
 				// TODO: How to handle errors on send?
 				if err != nil {
-					logCtx.Errorf("Error sending data: %v", err)
-					continue
+					status, ok := status.FromError(err)
+					if !ok {
+						logCtx.Errorf("Error sending data: %v", err)
+						continue
+					}
+					if status.Code() == codes.Unavailable {
+						logCtx.Info("Agent has closed the connection during send, closing send loop")
+						cancelFn()
+						return
+					}
 				}
 			}
 		}
 	}()
 
-	<-recvWaitC
+	<-ctx.Done()
 	return nil
 }
 
 // Push implements a client-side stream to receive updates for the client's
 // Application resources.
-func (s *server) Push(sub eventstreamapi.EventStream_PushServer) error {
+func (s *server) Push(pushs eventstreamapi.EventStream_PushServer) error {
+	logCtx := log().WithField("method", "Push")
+
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if s.options.MaxStreamDuration > 0 {
+		logCtx.Debugf("Setting timeout to %v", s.options.MaxStreamDuration)
+		ctx, cancel = context.WithTimeout(pushs.Context(), s.options.MaxStreamDuration)
+	} else {
+		ctx, cancel = context.WithCancel(pushs.Context())
+	}
+	defer cancel()
+
+	agentName, err := agentName(ctx)
+	if err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	logCtx = logCtx.WithField("client", agentName)
+	logCtx.Debug("A new client connected to the event stream")
+
+	summary := &eventstreamapi.PushSummary{}
+
+recvloop:
+	for {
+		u, err := pushs.Recv()
+		if err != nil {
+			st, ok := status.FromError(err)
+			if ok {
+				logCtx.Errorf("Error receiving event: %s", st.String())
+			} else if err == io.EOF {
+				logCtx.Infof("Client disconnected from stream")
+			} else {
+				logCtx.WithError(err).Errorf("Unexpected error")
+			}
+			break recvloop
+		}
+		select {
+		case <-ctx.Done():
+			logCtx.Infof("Context canceled")
+			break recvloop
+		default:
+			logCtx.Infof("Received update for: %s", u.Application.QualifiedName())
+			// In the Push stream, only application updates will be processed.
+			// However, depending on configuration, an application update that
+			// is observed may result in the creation of this particular app
+			// in the server's application backend.
+			ev := &event.Event{
+				Type:        event.EventTypeUpdateAppStatus,
+				Application: u.Application,
+			}
+			s.queues.RecvQ(agentName).Add(ev)
+			summary.Received += 1
+		}
+	}
+
+	logCtx.Infof("Sending summary to agent")
+	err = pushs.SendAndClose(summary)
+	if err != nil {
+		logCtx.Errorf("Error sending summary: %v", err)
+	}
+
 	return nil
 }
 

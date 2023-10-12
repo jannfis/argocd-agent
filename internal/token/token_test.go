@@ -3,10 +3,15 @@ package token
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
+	"math/big"
+	"os"
+	"path"
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jannfis/argocd-agent/test/fake/certs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -133,6 +138,39 @@ func Test_Issuer(t *testing.T) {
 		c, err := i.Validate(tok)
 		assert.ErrorContains(t, err, jwt.ErrTokenNotValidYet.Error())
 		assert.Nil(t, c)
+	})
+
+	t.Run("Issue a JWT with key from file", func(t *testing.T) {
+		tempDir := t.TempDir()
+		keyPath := path.Join(tempDir, "somekey.key")
+		certs.WriteRSAPrivateKey(t, keyPath)
+		i, err := NewIssuer("server", WithPrivateRSAKeyFromFile(keyPath))
+		require.NoError(t, err)
+		tok, err = i.Issue("agent", 5*time.Second)
+		require.NoError(t, err)
+	})
+
+	t.Run("Issuer using RSA key from non-existing file", func(t *testing.T) {
+		tempDir := t.TempDir()
+		keyPath := path.Join(tempDir, "somekey.key")
+		_, err := NewIssuer("server", WithPrivateRSAKeyFromFile(keyPath))
+		require.ErrorIs(t, err, os.ErrNotExist)
+	})
+
+	t.Run("Issuer using RSA key from file that has no PEM data", func(t *testing.T) {
+		tempDir := t.TempDir()
+		keyPath := path.Join(tempDir, "somekey.key")
+		os.WriteFile(keyPath, []byte("this is not a key"), 0600)
+		_, err := NewIssuer("server", WithPrivateRSAKeyFromFile(keyPath))
+		require.ErrorContains(t, err, "no valid PEM")
+	})
+
+	t.Run("Issuer using RSA key from file that has PEM without private key", func(t *testing.T) {
+		tempDir := t.TempDir()
+		basePath := path.Join(tempDir, "cert")
+		certs.WriteSelfSignedCert(t, basePath, x509.Certificate{SerialNumber: big.NewInt(1)})
+		_, err := NewIssuer("server", WithPrivateRSAKeyFromFile(basePath+".crt"))
+		require.ErrorContains(t, err, "no RSA private key")
 	})
 
 }
