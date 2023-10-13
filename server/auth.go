@@ -29,7 +29,7 @@ func (s *Server) authenticate(ctx context.Context) (context.Context, error) {
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "no authentication data found")
 	}
-	claims, err := s.issuer.Validate(jwt[0])
+	claims, err := s.issuer.ValidateAccessToken(jwt[0])
 	if err != nil {
 		logCtx.Warnf("Error validating token: %v", err)
 		return nil, status.Error(codes.Unauthenticated, "invalid authentication data")

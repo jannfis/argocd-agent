@@ -9,7 +9,6 @@ import (
 	"github.com/jannfis/argocd-agent/internal/auth"
 	"github.com/jannfis/argocd-agent/internal/token"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
-	"github.com/jannfis/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -42,7 +41,7 @@ func NewServer(authMethods *auth.Methods, issuer *token.Issuer, opts ...ServerOp
 		if err != nil {
 			return nil
 		}
-		issuer, err = token.NewIssuer("default", token.WithPrivateRSAKey(key))
+		issuer, err = token.NewIssuer("default", token.WithRSAPrivateKey(key))
 		if err != nil {
 			return nil
 		}
@@ -54,35 +53,38 @@ func NewServer(authMethods *auth.Methods, issuer *token.Issuer, opts ...ServerOp
 	return s
 }
 
-func authenticationFailed(reason string) *authapi.AuthResponse {
-	return &authapi.AuthResponse{
-		Result: types.AuthResultUnauthorized,
-	}
-}
-
 // Authenticate provides an authz endpoint for the Server. The client is
 // supposed to specify the authentication method and the credentials to use.
 //
 // A Server may support one or more authentication methods, and if the authz
 // request succeeds, a JWT will be issued to the client.
-func (s *server) Authenticate(ctx context.Context, a *authapi.AuthRequest) (*authapi.AuthResponse, error) {
-	am := s.authMethods.Method(a.Method)
+func (s *server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*authapi.AuthResponse, error) {
+	am := s.authMethods.Method(ar.Method)
 	if am == nil {
-		return authenticationFailed(""), status.Error(codes.Unauthenticated, "unsupported authentication method")
+		return nil, status.Error(codes.Unauthenticated, "unsupported authentication method")
 	}
-	clientID, err := am.Authenticate(a.Credentials)
+	clientID, err := am.Authenticate(ar.Credentials)
 	if clientID == "" || err != nil {
-		return authenticationFailed(""), status.Error(codes.Unauthenticated, "authentication failed")
+		return nil, status.Error(codes.Unauthenticated, "authentication failed")
 	}
-	token, err := s.issuer.Issue(clientID, 1*time.Hour)
+	accessToken, err := s.issuer.IssueAccessToken(clientID, 1*time.Hour)
 	if err != nil {
-		log().WithField("method", "Authenticate").WithError(err).Warnf("Unable to generate token")
-		return authenticationFailed(""), status.Error(codes.Internal, "unable to generate a token")
+		log().WithField("method", "Authenticate").WithError(err).Warnf("Unable to generate access token")
+		return nil, status.Error(codes.Internal, "unable to generate a token")
+	}
+	refreshToken, err := s.issuer.IssueRefreshToken(clientID, 8*time.Hour)
+	if err != nil {
+		log().WithField("method", "Authenticate").WithError(err).Warnf("Unable to generate refresh token")
+		return nil, status.Error(codes.Internal, "unable to generate a token")
 	}
 	return &authapi.AuthResponse{
-		Result: types.AuthResultOK,
-		Token:  token,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
 	}, nil
+}
+
+func (s *server) RefreshToken(ctx context.Context, r *authapi.RefreshTokenRequest) (*authapi.AuthResponse, error) {
+	return nil, nil
 }
 
 func log() *logrus.Entry {

@@ -100,7 +100,7 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 				// of configured filters.
 				preFilteredItems := make([]v1alpha1.Application, 0)
 				for _, app := range appList.Items {
-					if i.isAppAllowed(&app) {
+					if i.shouldProcessApp(&app) {
 						preFilteredItems = append(preFilteredItems, app)
 						logCtx.Tracef("Allowing app %s in namespace %s", app.Name, app.Namespace)
 					} else {
@@ -147,7 +147,7 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 					// }
 					return
 				}
-				if !i.isAppAllowed(app) {
+				if !i.shouldProcessApp(app) {
 					return
 				}
 				if i.options.newCb != nil {
@@ -178,7 +178,7 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 					return
 				}
 
-				if !i.isAppAllowed(newApp) {
+				if !i.shouldProcessApp(newApp) {
 					logCtx.Tracef("application not allowed")
 					return
 				}
@@ -205,7 +205,7 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 					return
 				}
 				logCtx = logCtx.WithField("application", app.QualifiedName())
-				if !i.isAppAllowed(app) {
+				if !i.shouldProcessApp(app) {
 					logCtx.Tracef("Ignoring application delete event")
 					return
 				}
@@ -229,8 +229,8 @@ func (i *AppInformer) Start(stopch <-chan struct{}) {
 	i.Informer.Run(stopch)
 }
 
-// isAppAllowed returns true if the app is allowed to be processed
-func (i *AppInformer) isAppAllowed(app *v1alpha1.Application) bool {
+// shouldProcessApp returns true if the app is allowed to be processed
+func (i *AppInformer) shouldProcessApp(app *v1alpha1.Application) bool {
 	return glob.MatchStringInList(append([]string{i.options.namespace}, i.options.namespaces...), app.Namespace, false) &&
 		i.options.filters.Admit(app)
 }

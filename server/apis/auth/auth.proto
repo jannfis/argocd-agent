@@ -13,15 +13,26 @@ message AuthRequest {
 }
 
 message AuthResponse {
-    string result = 1;
-    string token = 2;
+    string accessToken = 1;
+    string refreshToken = 2;
+}
+
+message RefreshTokenRequest {
+    string refreshToken = 1;
 }
 
 service Authentication {
     rpc Authenticate(AuthRequest) returns (AuthResponse) {
         option (google.api.http) = {
-            post: "/api/v1/authenticate"
+            post: "/api/v1/auth/authenticate"
             body: "auth"
+        };
+    }
+
+    rpc RefreshToken(RefreshTokenRequest) returns (AuthResponse) {
+        option (google.api.http) = {
+            post: "/api/v1/auth/refresh"
+            body: "refresh"
         };
     }
 }

@@ -4,21 +4,11 @@ import (
 	"github.com/jannfis/argocd-agent/internal/appinformer"
 	"github.com/jannfis/argocd-agent/internal/filter"
 
-	// "github.com/jannfis/argocd-agent/internal/filter"
-	"github.com/jannfis/argocd-agent/internal/metrics"
-	log "github.com/sirupsen/logrus"
-
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
-	applisters "github.com/argoproj/argo-cd/v2/pkg/client/listers/application/v1alpha1"
 )
-
-type agentMetrics struct {
-	app *metrics.ApplicationWatcherMetrics
-}
 
 // Agent is a controller that synchronizes Application resources
 type Agent struct {
@@ -26,12 +16,7 @@ type Agent struct {
 	appclient appclientset.Interface
 	opts      AgentOptions
 
-	appInformer cache.SharedIndexInformer
-	appLister   applisters.ApplicationLister
-
 	informer *appinformer.AppInformer
-
-	metrics agentMetrics
 
 	filters *filter.Chain
 }
@@ -67,18 +52,15 @@ func NewAgent(client kubernetes.Interface, appclient appclientset.Interface, opt
 	// a.appInformer = a.newInformer()
 	// a.appLister = applisters.NewApplicationLister(a.appInformer.GetIndexer())
 
-	// Set up metrics providers
-	a.metrics.app = metrics.NewApplicationWatcherMetrics()
-
 	// Set up default filter chain
 	// a.filters = a.DefaultFilterChain()
 
-	a.informer = appinformer.NewAppInformer(a.appclient, a.opts.namespace, appinformer.WithMetrics(a.metrics.app))
+	a.informer = appinformer.NewAppInformer(a.appclient, a.opts.namespace)
 	return a
 }
 
 func (a *Agent) Run(stopchan chan struct{}) error {
-	log.Infof("Starting Argo CD agent (ns=%s, allowed_namespaces=%v)", a.opts.namespace, a.opts.namespaces)
+	log().Infof("Starting Argo CD agent (ns=%s, allowed_namespaces=%v)", a.opts.namespace, a.opts.namespaces)
 	go func() {
 		a.informer.Informer.Run(stopchan)
 	}()

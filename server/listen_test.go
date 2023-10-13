@@ -14,7 +14,6 @@ import (
 	"github.com/jannfis/argocd-agent/internal/version"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/versionapi"
-	"github.com/jannfis/argocd-agent/pkg/types"
 	fakecerts "github.com/jannfis/argocd-agent/test/fake/certs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -155,7 +154,7 @@ func Test_Serve(t *testing.T) {
 		&authapi.AuthRequest{Method: "userpass", Credentials: creds("hello", "world")},
 	)
 	require.NoError(t, err)
-	require.Equal(t, a.Result, types.AuthResultOK)
+	require.NotNil(t, a)
 	versionC := versionapi.NewVersionClient(conn)
 	v, err := versionC.Version(context.Background(), &versionapi.VersionRequest{})
 	require.NoError(t, err)

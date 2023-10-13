@@ -52,7 +52,7 @@ func WriteSelfSignedCert(t *testing.T, basePath string, templ x509.Certificate) 
 	}
 }
 
-func WriteRSAPrivateKey(t *testing.T, path string) {
+func WriteRSAPrivateKey(t *testing.T, path string) *rsa.PrivateKey {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -61,6 +61,25 @@ func WriteRSAPrivateKey(t *testing.T, path string) {
 
 	var keyPem bytes.Buffer
 	err = pem.Encode(&keyPem, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	if err != nil {
+		t.Fatalf("error encoding key: %v", err)
+	}
+	err = os.WriteFile(path, keyPem.Bytes(), 0600)
+	if err != nil {
+		t.Fatalf("error writing key: %v", err)
+	}
+	return key
+}
+
+func WriteRSAPublicKey(t *testing.T, path string) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("error generate key: %v", err)
+	}
+
+	var keyPem bytes.Buffer
+	err = pem.Encode(&keyPem, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PublicKey(&key.PublicKey)})
 	if err != nil {
 		t.Fatalf("error encoding key: %v", err)
 	}

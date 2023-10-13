@@ -94,7 +94,7 @@ func Test_EndToEnd_Subscribe(t *testing.T) {
 		userpass.ClientSecretField: "password",
 	}})
 	require.NoError(t, err)
-	clientCtx = metadata.AppendToOutgoingContext(clientCtx, "authorization", authr.Token)
+	clientCtx = metadata.AppendToOutgoingContext(clientCtx, "authorization", authr.AccessToken)
 
 	sub, err := eventC.Subscribe(clientCtx)
 	require.NotNil(t, sub)
@@ -163,7 +163,7 @@ func Test_EndToEnd_Push(t *testing.T) {
 		userpass.ClientSecretField: "password",
 	}})
 	require.NoError(t, err)
-	clientCtx = metadata.AppendToOutgoingContext(clientCtx, "authorization", authr.Token)
+	clientCtx = metadata.AppendToOutgoingContext(clientCtx, "authorization", authr.AccessToken)
 
 	pushc, err := eventC.Push(clientCtx)
 	require.NoError(t, err)

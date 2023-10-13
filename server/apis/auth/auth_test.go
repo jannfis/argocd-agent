@@ -7,7 +7,6 @@ import (
 	"github.com/jannfis/argocd-agent/internal/auth"
 	"github.com/jannfis/argocd-agent/internal/auth/userpass"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
-	"github.com/jannfis/argocd-agent/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,13 +32,22 @@ func Test_Authenticate(t *testing.T) {
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"}},
 		)
 		require.NoError(t, err)
-		assert.Equal(t, types.AuthResultOK, r.Result)
-		assert.NotEmpty(t, r.Token)
-		claims, err := auths.issuer.Validate(r.Token)
+		require.NotNil(t, r)
+		assert.NotEmpty(t, r.AccessToken)
+		assert.NotEmpty(t, r.RefreshToken)
+		claims, err := auths.issuer.ValidateAccessToken(r.AccessToken)
 		assert.NoError(t, err)
+		assert.NotNil(t, claims)
 		userid, err := claims.GetSubject()
 		assert.NoError(t, err)
 		assert.Equal(t, "user1", userid)
+		claims, err = auths.issuer.ValidateRefreshToken(r.RefreshToken)
+		assert.NoError(t, err)
+		assert.NotNil(t, claims)
+		userid, err = claims.GetSubject()
+		assert.NoError(t, err)
+		assert.Equal(t, "user1", userid)
+
 	})
 
 	t.Run("Wrong credentials", func(t *testing.T) {

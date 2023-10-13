@@ -58,7 +58,7 @@ func NewServer(appClient appclientset.Interface, namespace string, opts ...Serve
 		options.signingKey = key
 	}
 
-	issuer, err := token.NewIssuer("argocd-agent-server", token.WithPrivateRSAKey(options.signingKey))
+	issuer, err := token.NewIssuer("argocd-agent-server", token.WithRSAPrivateKey(options.signingKey))
 	if err != nil {
 		return nil, err
 	}
