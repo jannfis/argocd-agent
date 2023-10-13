@@ -1,4 +1,4 @@
-package agent
+package client
 
 import (
 	"context"
@@ -57,7 +57,6 @@ type Remote struct {
 	creds        auth.Credentials
 	backoff      wait.Backoff
 	conn         *grpc.ClientConn
-
 	// timeouts   timeouts
 }
 
@@ -195,7 +194,7 @@ func (r *Remote) retriable(err error) bool {
 	return true
 }
 
-func (r *Remote) authStreamInterceptor(ctx context.Context, method string, req interface{}, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+func (r *Remote) unaryAuthInterceptor(ctx context.Context, method string, req interface{}, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 	log().Infof("Outgoing call to %s", method)
 	var nCtx context.Context = ctx
 	if r.accessToken != nil && r.accessToken.RawToken != "" {
@@ -211,7 +210,7 @@ func (r *Remote) authStreamInterceptor(ctx context.Context, method string, req i
 //
 // When Connect returns nil, the connection was successfully established and an
 // authentication token has been received.
-func (r *Remote) Connect(ctx context.Context) error {
+func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 	creds := credentials.NewTLS(r.tlsConfig)
 	cparams := grpc.ConnectParams{
 		Backoff: backoff.DefaultConfig,
@@ -222,7 +221,7 @@ func (r *Remote) Connect(ctx context.Context) error {
 		grpc.WithTransportCredentials(creds),
 		grpc.WithConnectParams(cparams),
 		grpc.WithUserAgent("argocd-agent/v0.0.1"),
-		grpc.WithUnaryInterceptor(r.authStreamInterceptor),
+		grpc.WithUnaryInterceptor(r.unaryAuthInterceptor),
 	}
 
 	conn, err := grpc.DialContext(ctx, r.Addr(), opts...)

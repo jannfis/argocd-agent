@@ -1,4 +1,4 @@
-package agent
+package client
 
 import (
 	"context"
@@ -46,7 +46,7 @@ func Test_Connect(t *testing.T) {
 		require.NotNil(t, r)
 		ctx, cancelFn := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancelFn()
-		err = r.Connect(ctx)
+		err = r.Connect(ctx, false)
 		assert.NoError(t, err)
 		assert.NotNil(t, r.conn)
 		require.NotNil(t, r.accessToken.Claims)
@@ -64,7 +64,7 @@ func Test_Connect(t *testing.T) {
 		require.NotNil(t, r)
 		ctx, cancelFn := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancelFn()
-		err = r.Connect(ctx)
+		err = r.Connect(ctx, false)
 		assert.Error(t, err)
 		assert.Nil(t, r.conn)
 	})

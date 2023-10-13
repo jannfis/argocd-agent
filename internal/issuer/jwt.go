@@ -1,4 +1,4 @@
-package token
+package issuer
 
 import (
 	"crypto/rsa"
@@ -10,35 +10,40 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/jannfis/argocd-agent/internal/clock"
 )
 
-// Issuer issues and validates access and refresh tokens in JWT format. If the
-// Issuer is configured with a private key, it can be used to both issue and
-// validate tokens. If the Issuer is configured with a public key but not a
-// private key, it can be only used to verify tokens. An Issuer should not be
-// configured with both, a private and a public key. For Issuers with a private
-// key, the public key for validation will be derived from the private key.
-type Issuer struct {
+var _ Issuer = &JwtIssuer{}
+
+// JwtIssuer issues and validates access and refresh tokens in JWT format. If
+// the JwtIssuer is configured with a private key, it can be used to both
+// issue and validate tokens. If the JwtIssuer is configured with a public key
+// but not a private key, it can be only used to verify tokens. An JwtIssuer
+// should not be configured with both, a private and a public key. For Issuers
+// with a private key, the public key for validation will be derived from the
+// private key.
+type JwtIssuer struct {
 	name       string
 	privateKey *rsa.PrivateKey
 	publicKey  *rsa.PublicKey
 	atAudience string
 	rtAudience string
+	clock      clock.Clock
 }
 
-// IssuerOption is a function to set options for the Issuer
-type IssuerOption func(i *Issuer) error
+// JwtIssuerOption is a function to set options for the Issuer
+type JwtIssuerOption func(i *JwtIssuer) error
 
 // WithRSAPrivateKey sets the private RSA for the Issuer
-func WithRSAPrivateKey(key *rsa.PrivateKey) IssuerOption {
-	return func(i *Issuer) error {
+func WithRSAPrivateKey(key *rsa.PrivateKey) JwtIssuerOption {
+	return func(i *JwtIssuer) error {
 		i.privateKey = key
 		return nil
 	}
 }
 
-func WithRSAPublicKey(key *rsa.PublicKey) IssuerOption {
-	return func(i *Issuer) error {
+func WithRSAPublicKey(key *rsa.PublicKey) JwtIssuerOption {
+	return func(i *JwtIssuer) error {
 		i.publicKey = key
 		return nil
 	}
@@ -46,8 +51,8 @@ func WithRSAPublicKey(key *rsa.PublicKey) IssuerOption {
 
 // WithRSAPrivateKeyFromFile loads a PEM-encoded RSA private key from path and
 // sets it as the private RSA key for the Issuer
-func WithRSAPrivateKeyFromFile(path string) IssuerOption {
-	return func(i *Issuer) error {
+func WithRSAPrivateKeyFromFile(path string) JwtIssuerOption {
+	return func(i *JwtIssuer) error {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("could not read RSA private key: %w", err)
@@ -67,8 +72,8 @@ func WithRSAPrivateKeyFromFile(path string) IssuerOption {
 
 // WithRSAPublicKeyFromFile loads a PEM-encoded RSA private key from path and
 // sets it as the private RSA key for the Issuer
-func WithRSAPublicKeyFromFile(path string) IssuerOption {
-	return func(i *Issuer) error {
+func WithRSAPublicKeyFromFile(path string) JwtIssuerOption {
+	return func(i *JwtIssuer) error {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("could not read RSA public key: %w", err)
@@ -88,11 +93,12 @@ func WithRSAPublicKeyFromFile(path string) IssuerOption {
 
 // NewIssuer creates a new instance of Issuer, which is used to issue JWTs
 // to authenticated clients and to validate incoming JWTs.
-func NewIssuer(name string, opts ...IssuerOption) (*Issuer, error) {
-	iss := &Issuer{
+func NewIssuer(name string, opts ...JwtIssuerOption) (*JwtIssuer, error) {
+	iss := &JwtIssuer{
 		name:       name,
 		atAudience: name + "-access",
 		rtAudience: name + "-refresh",
+		clock:      clock.StandardClock(),
 	}
 	for _, o := range opts {
 		if err := o(iss); err != nil {
@@ -102,7 +108,7 @@ func NewIssuer(name string, opts ...IssuerOption) (*Issuer, error) {
 	return iss, nil
 }
 
-func (i *Issuer) validationKey(t *jwt.Token) (interface{}, error) {
+func (i *JwtIssuer) validationKey(t *jwt.Token) (interface{}, error) {
 	var pubKey *rsa.PublicKey
 	switch t.Method {
 	case jwt.SigningMethodRS512:
@@ -118,7 +124,7 @@ func (i *Issuer) validationKey(t *jwt.Token) (interface{}, error) {
 	return pubKey, nil
 }
 
-func (i *Issuer) validateToken(token string, aud string) (jwt.Claims, error) {
+func (i *JwtIssuer) validateToken(token string, aud string) (jwt.Claims, error) {
 	t, err := jwt.Parse(token, i.validationKey,
 		jwt.WithAudience(aud),
 		jwt.WithIssuer(i.name),
@@ -133,8 +139,8 @@ func (i *Issuer) validateToken(token string, aud string) (jwt.Claims, error) {
 
 // IssueAccessToken creates and signs a new refresh token for client, which is
 // valid for the duration specified as exp. The result is returned as a string.
-func (i *Issuer) IssueAccessToken(client string, exp time.Duration) (string, error) {
-	now := time.Now()
+func (i *JwtIssuer) IssueAccessToken(client string, exp time.Duration) (string, error) {
+	now := i.clock.Now()
 	t := jwt.NewWithClaims(jwt.SigningMethodRS512, jwt.RegisteredClaims{
 		ID:        uuid.New().String(),
 		Issuer:    i.name,
@@ -149,8 +155,8 @@ func (i *Issuer) IssueAccessToken(client string, exp time.Duration) (string, err
 
 // IssueRefreshToken creates and signs a new refresh token for client, which is
 // valid for the duration specified as exp. The result is returned as a string.
-func (i *Issuer) IssueRefreshToken(client string, exp time.Duration) (string, error) {
-	now := time.Now()
+func (i *JwtIssuer) IssueRefreshToken(client string, exp time.Duration) (string, error) {
+	now := i.clock.Now()
 	t := jwt.NewWithClaims(jwt.SigningMethodRS512, jwt.RegisteredClaims{
 		ID:        uuid.New().String(),
 		Issuer:    i.name,
@@ -166,13 +172,13 @@ func (i *Issuer) IssueRefreshToken(client string, exp time.Duration) (string, er
 // ValidateAccessToken validates an access token. On successfull validation,
 // it returns the claims from the token. If validation fails, an error with
 // the failure reason is returned.
-func (i *Issuer) ValidateAccessToken(token string) (jwt.Claims, error) {
+func (i *JwtIssuer) ValidateAccessToken(token string) (Claims, error) {
 	return i.validateToken(token, i.atAudience)
 }
 
 // ValidateRefreshToken validates an access token. On successfull validation,
 // it returns the claims from the token. If validation fails, an error with
 // the failure reason is returned.
-func (i *Issuer) ValidateRefreshToken(token string) (jwt.Claims, error) {
+func (i *JwtIssuer) ValidateRefreshToken(token string) (Claims, error) {
 	return i.validateToken(token, i.rtAudience)
 }

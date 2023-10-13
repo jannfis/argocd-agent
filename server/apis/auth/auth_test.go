@@ -18,7 +18,7 @@ func Test_Authenticate(t *testing.T) {
 			Method:      "userpass",
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"}},
 		)
-		assert.ErrorContains(t, err, "unsupported authentication method")
+		assert.ErrorContains(t, err, authFailedMessage)
 	})
 	t.Run("Authentication successful", func(t *testing.T) {
 		ams := auth.NewMethods()
@@ -77,4 +77,28 @@ func Test_Authenticate(t *testing.T) {
 		require.ErrorContains(t, err, "authentication failed")
 	})
 
+}
+
+func Test_RefreshToken(t *testing.T) {
+	t.Run("Request a refresh token", func(t *testing.T) {
+		ams := auth.NewMethods()
+		am := userpass.NewUserPassAuthentication()
+		am.UpsertUser("user1", "password")
+		err := ams.RegisterMethod("userpass", am)
+		require.NoError(t, err)
+		auths := NewServer(ams, nil)
+		r, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
+			Method:      "userpass",
+			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"}},
+		)
+		require.NoError(t, err)
+		require.NotNil(t, r)
+		assert.NotEmpty(t, r.AccessToken)
+		assert.NotEmpty(t, r.RefreshToken)
+		nr, err := auths.RefreshToken(context.TODO(), &authapi.RefreshTokenRequest{RefreshToken: r.RefreshToken})
+		require.NoError(t, err)
+		require.NotNil(t, nr)
+		assert.NotEqual(t, r.AccessToken, nr.AccessToken)
+		assert.NotEqual(t, r.RefreshToken, nr.RefreshToken)
+	})
 }

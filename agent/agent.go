@@ -3,6 +3,7 @@ package agent
 import (
 	"github.com/jannfis/argocd-agent/internal/appinformer"
 	"github.com/jannfis/argocd-agent/internal/filter"
+	"github.com/sirupsen/logrus"
 
 	"k8s.io/client-go/kubernetes"
 
@@ -69,4 +70,8 @@ func (a *Agent) Run(stopchan chan struct{}) error {
 
 func (a *Agent) Stop() error {
 	return nil
+}
+
+func log() *logrus.Entry {
+	return logrus.WithField("module", "Agent")
 }

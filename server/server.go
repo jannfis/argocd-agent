@@ -14,9 +14,9 @@ import (
 	"github.com/jannfis/argocd-agent/internal/appinformer"
 	"github.com/jannfis/argocd-agent/internal/application"
 	"github.com/jannfis/argocd-agent/internal/auth"
+	"github.com/jannfis/argocd-agent/internal/issuer"
 	"github.com/jannfis/argocd-agent/internal/metrics"
 	"github.com/jannfis/argocd-agent/internal/queue"
-	"github.com/jannfis/argocd-agent/internal/token"
 	"github.com/jannfis/argocd-agent/server/backend/kubernetes"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -31,11 +31,18 @@ type Server struct {
 	authMethods *auth.Methods
 	queues      *queue.SendRecvQueues
 	namespace   string
-	issuer      *token.Issuer
+	issuer      issuer.Issuer
 	noauth      map[string]bool // noauth contains endpoints accessible without authentication
 	ctx         context.Context
 	ctxCancel   context.CancelFunc
 	appManager  *application.Manager
+}
+
+// noAuthEndpoints is a list of endpoints that are available without the need
+// for the request to be authenticated.
+var noAuthEndpoints = map[string]bool{
+	"/versionapi.Version/Version":          true,
+	"/authapi.Authentication/Authenticate": true,
 }
 
 func NewServer(appClient appclientset.Interface, namespace string, opts ...ServerOption) (*Server, error) {
@@ -58,7 +65,7 @@ func NewServer(appClient appclientset.Interface, namespace string, opts ...Serve
 		options.signingKey = key
 	}
 
-	issuer, err := token.NewIssuer("argocd-agent-server", token.WithRSAPrivateKey(options.signingKey))
+	issuer, err := issuer.NewIssuer("argocd-agent-server", issuer.WithRSAPrivateKey(options.signingKey))
 	if err != nil {
 		return nil, err
 	}
@@ -69,10 +76,7 @@ func NewServer(appClient appclientset.Interface, namespace string, opts ...Serve
 		queues:      queue.NewSendRecvQueues(),
 		namespace:   namespace,
 		issuer:      issuer,
-		noauth: map[string]bool{
-			"/versionapi.Version/Version":          true,
-			"/authapi.Authentication/Authenticate": true,
-		},
+		noauth:      noAuthEndpoints,
 	}
 
 	informerOpts := []appinformer.AppInformerOption{
@@ -178,7 +182,7 @@ func (s *Server) Listener() *Listener {
 }
 
 // TokenIssuer returns the token issuer of Server s
-func (s *Server) TokenIssuer() *token.Issuer {
+func (s *Server) TokenIssuer() issuer.Issuer {
 	return s.issuer
 }
 
