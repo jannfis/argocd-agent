@@ -2,12 +2,9 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"time"
 
 	"github.com/jannfis/argocd-agent/internal/auth"
-	"github.com/jannfis/argocd-agent/internal/clock"
 	"github.com/jannfis/argocd-agent/internal/issuer"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/sirupsen/logrus"
@@ -20,17 +17,19 @@ type server struct {
 	authMethods *auth.Methods
 	issuer      issuer.Issuer
 	options     *ServerOptions
-	clock       clock.Clock
 }
 
 const (
-	accessTokenValidity  = 5 * time.Minute
-	refreshTokenValidity = 24 * time.Hour
+	accessTokenValidity     = 5 * time.Minute
+	refreshTokenValidity    = 24 * time.Hour
+	refreshTokenAutoRefresh = 10 * time.Minute
 )
 
 const (
 	authFailedMessage = "authentication failed"
 )
+
+var errAuthenticationFailed = status.Error(codes.Unauthenticated, authFailedMessage)
 
 type ServerOptions struct {
 }
@@ -47,21 +46,10 @@ func NewServer(authMethods *auth.Methods, iss issuer.Issuer, opts ...ServerOptio
 	} else {
 		s.authMethods = auth.NewMethods()
 	}
-	if iss == nil {
-		key, err := rsa.GenerateKey(rand.Reader, 2048)
-		if err != nil {
-			return nil
-		}
-		iss, err = issuer.NewIssuer("default", issuer.WithRSAPrivateKey(key))
-		if err != nil {
-			return nil
-		}
-	}
 	s.issuer = iss
 	for _, o := range opts {
 		o(s.options)
 	}
-	s.clock = clock.StandardClock()
 	return s
 }
 
@@ -89,17 +77,17 @@ func (s *server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 	am := s.authMethods.Method(ar.Method)
 	if am == nil {
 		logCtx.Info("unknown authentication method")
-		return nil, status.Error(codes.Unauthenticated, authFailedMessage)
+		return nil, errAuthenticationFailed
 	}
 	clientID, err := am.Authenticate(ar.Credentials)
 	if clientID == "" || err != nil {
 		logCtx.WithError(err).WithField("client", clientID).Info("client authentication failed")
-		return nil, status.Error(codes.Unauthenticated, authFailedMessage)
+		return nil, errAuthenticationFailed
 	}
 	accessToken, refreshToken, err := s.issueTokens(clientID, true)
 	if err != nil {
 		logCtx.WithError(err).Warnf("Unable to generate token")
-		return nil, err
+		return nil, errAuthenticationFailed
 	}
 	return &authapi.AuthResponse{
 		AccessToken:  accessToken,
@@ -114,20 +102,20 @@ func (s *server) RefreshToken(ctx context.Context, r *authapi.RefreshTokenReques
 	logCtx := log().WithField("method", "RefreshToken")
 	if r.RefreshToken == "" {
 		logCtx.Warn("No refresh token supplied")
-		return nil, status.Error(codes.Unauthenticated, authFailedMessage)
+		return nil, errAuthenticationFailed
 	}
 
 	c, err := s.issuer.ValidateRefreshToken(r.RefreshToken)
 	if err != nil {
 		logCtx.WithError(err).Warnf("Could not validate refresh token")
-		return nil, status.Error(codes.Unauthenticated, authFailedMessage)
+		return nil, errAuthenticationFailed
 	}
 
 	// We need the subject of the refresh token to issue a new one
 	subj, err := c.GetSubject()
 	if err != nil {
 		logCtx.WithError(err).Warnf("Could not get subject from refresh token")
-		return nil, status.Error(codes.Unauthenticated, authFailedMessage)
+		return nil, errAuthenticationFailed
 	}
 
 	// We only want to issue a new refresh token when the old one is close to
@@ -135,17 +123,17 @@ func (s *server) RefreshToken(ctx context.Context, r *authapi.RefreshTokenReques
 	exp, err := c.GetExpirationTime()
 	if err != nil {
 		logCtx.WithError(err).Warnf("Could not get exp from refresh token")
-		return nil, status.Error(codes.Unauthenticated, authFailedMessage)
+		return nil, errAuthenticationFailed
 	}
 	refresh := false
-	if s.clock.Until(exp.Time) < 10*time.Minute {
+	if time.Until(exp.Time) < refreshTokenAutoRefresh {
 		refresh = true
 	}
 
 	accessToken, refreshToken, err := s.issueTokens(subj, refresh)
 	if err != nil {
 		logCtx.WithError(err).WithField("refresh", refresh).Warnf("Could not issue a new token")
-		return nil, status.Error(codes.Internal, "could not issue tokens")
+		return nil, errAuthenticationFailed
 	}
 	return &authapi.AuthResponse{AccessToken: accessToken, RefreshToken: refreshToken}, nil
 }
