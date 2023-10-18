@@ -1,0 +1,148 @@
+package agent
+
+import (
+	"reflect"
+
+	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/jannfis/argocd-agent/internal/event"
+)
+
+// listAppCallback
+func (a *Agent) listAppCallback(apps []v1alpha1.Application) []v1alpha1.Application {
+	logCtx := log().WithField("event", "ListApps")
+	logCtx.Debugf("List apps event")
+
+	// Every time we're relisting, we are clearing the managed apps list
+	// and re-add all apps returned by the lister.
+	a.appManager.ClearManaged()
+	for _, app := range apps {
+		a.appManager.Manage(app.QualifiedName())
+	}
+	return apps
+}
+
+// addAppCreationToQueue processes a new application event originating from the
+// AppInformer and puts it in the send queue.
+func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
+	logCtx := log().WithField("event", "NewApp").WithField("application", app.QualifiedName())
+	logCtx.Debugf("New app event")
+
+	// If the agent is not connected, we ignore this event. It just makes no
+	// sense to fill up the send queue when we can't send.
+	if !a.IsConnected() {
+		logCtx.Trace("Agent is not connected, ignoring this event")
+		return
+	}
+
+	// Update events trigger a new event sometimes, too. If we've already seen
+	// the app, we just ignore the request then.
+	if a.appManager.IsManaged(app.QualifiedName()) {
+		logCtx.Trace("App is already managed")
+		return
+	}
+
+	if err := a.appManager.Manage(app.QualifiedName()); err != nil {
+		logCtx.Tracef("Could not manage app: %v", err)
+		return
+	}
+
+	q := a.queues.SendQ(defaultQueueName)
+	if q == nil {
+		logCtx.Error("Default queue disappeared!")
+		return
+	}
+	ev := event.Event{
+		Type:        event.EventTypeAddApp,
+		Application: app,
+	}
+
+	q.Add(ev)
+	logCtx.WithField("sendq_len", q.Len()).Debugf("Added app create event to send queue")
+}
+
+// addAppUpdateToQueue processes an application update event originating from
+// the AppInformer and puts it in the send queue.
+func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.Application) {
+	logCtx := log().WithField("event", "UpdateApp").WithField("application", old.QualifiedName())
+	a.watchLock.Lock()
+	defer a.watchLock.Unlock()
+	if a.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
+		logCtx.Debugf("Ignoring this change for resource version %s", new.ResourceVersion)
+		a.appManager.UnignoreChange(new.QualifiedName(), new.ResourceVersion)
+		return
+	}
+	if !reflect.DeepEqual(old.ObjectMeta.Annotations, new.ObjectMeta.Annotations) {
+		logCtx.Debugf("Annotations differ")
+	}
+	if !reflect.DeepEqual(old.ObjectMeta.Labels, new.ObjectMeta.Labels) {
+		logCtx.Debugf("Labels differ")
+	}
+
+	if !reflect.DeepEqual(old.Spec, new.Spec) {
+		logCtx.Debugf("Spec differs")
+	}
+
+	if !reflect.DeepEqual(old.Status, new.Status) {
+		logCtx.Debugf("Status differ")
+	}
+
+	if !reflect.DeepEqual(old.Operation, new.Operation) {
+		logCtx.Debugf("Operation differ")
+	}
+
+	// If the agent is not connected, we ignore this event. It just makes no
+	// sense to fill up the send queue when we can't send.
+	if !a.IsConnected() {
+		logCtx.Trace("Agent is not connected, ignoring this event")
+		return
+	}
+
+	if !a.appManager.IsManaged(new.QualifiedName()) {
+		logCtx.Tracef("App is not managed")
+		return
+	}
+
+	q := a.queues.SendQ(defaultQueueName)
+	if q == nil {
+		logCtx.Error("Default queue disappeared!")
+		return
+	}
+	ev := event.Event{
+		Type:        event.EventTypeUpdateAppStatus,
+		Application: new,
+	}
+
+	q.Add(ev)
+	logCtx.WithField("sendq_len", q.Len()).Debugf("Added app update event to send queue")
+}
+
+// addAppDeletionToQueue processes an application delete event originating from
+// the AppInformer and puts it in the send queue.
+func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
+	logCtx := log().WithField("event", "DeleteApp").WithField("application", app.QualifiedName())
+	logCtx.Debugf("Delete app event")
+
+	// If the agent is not connected, we ignore this event. It just makes no
+	// sense to fill up the send queue when we can't send.
+	if !a.IsConnected() {
+		logCtx.Trace("Agent is not connected, ignoring this event")
+		return
+	}
+
+	if !a.appManager.IsManaged(app.QualifiedName()) {
+		logCtx.Tracef("App is not managed")
+	}
+
+	q := a.queues.SendQ(defaultQueueName)
+	if q == nil {
+		logCtx.Error("Default queue disappeared!")
+		return
+	}
+	ev := event.Event{
+		Type:        event.EventTypeDeleteApp,
+		Application: app,
+	}
+
+	q.Add(ev)
+	logCtx.WithField("sendq_len", q.Len()).Debugf("Added app delete event to send queue")
+}

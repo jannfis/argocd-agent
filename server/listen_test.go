@@ -65,7 +65,7 @@ func Test_Listen(t *testing.T) {
 	templ := certTempl
 	fakecerts.WriteSelfSignedCert(t, path.Join(tempDir, "test-cert"), templ)
 	t.Run("Auto-select port for listener", func(t *testing.T) {
-		s, err := NewServer(fakeappclient.NewSimpleClientset(), testNamespace,
+		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
 			WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 			WithListenerPort(0),
 			WithListenerAddress("127.0.0.1"),
@@ -79,7 +79,7 @@ func Test_Listen(t *testing.T) {
 	})
 
 	t.Run("Listen on privileged port", func(t *testing.T) {
-		s, err := NewServer(fakeappclient.NewSimpleClientset(), testNamespace,
+		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
 			WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 			WithListenerPort(443),
 			WithListenerAddress("127.0.0.1"),
@@ -129,7 +129,7 @@ func Test_Serve(t *testing.T) {
 	fakecerts.WriteSelfSignedCert(t, path.Join(tempDir, "test-cert"), templ)
 
 	// We start a real (non-mocked) server
-	s, err := NewServer(fakeappclient.NewSimpleClientset(), testNamespace,
+	s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
 		WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 		WithListenerPort(0),
 		WithListenerAddress("127.0.0.1"),

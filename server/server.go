@@ -1,11 +1,13 @@
 package server
 
 import (
+	"bytes"
 	context "context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"time"
@@ -14,10 +16,11 @@ import (
 	"github.com/jannfis/argocd-agent/internal/appinformer"
 	"github.com/jannfis/argocd-agent/internal/application"
 	"github.com/jannfis/argocd-agent/internal/auth"
+	"github.com/jannfis/argocd-agent/internal/backend/kubernetes"
 	"github.com/jannfis/argocd-agent/internal/issuer"
 	"github.com/jannfis/argocd-agent/internal/metrics"
 	"github.com/jannfis/argocd-agent/internal/queue"
-	"github.com/jannfis/argocd-agent/server/backend/kubernetes"
+	"github.com/jannfis/argocd-agent/internal/version"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
@@ -36,6 +39,7 @@ type Server struct {
 	ctx         context.Context
 	ctxCancel   context.CancelFunc
 	appManager  *application.Manager
+	informer    *appinformer.AppInformer
 }
 
 // noAuthEndpoints is a list of endpoints that are available without the need
@@ -45,43 +49,52 @@ var noAuthEndpoints = map[string]bool{
 	"/authapi.Authentication/Authenticate": true,
 }
 
-func NewServer(appClient appclientset.Interface, namespace string, opts ...ServerOption) (*Server, error) {
-	options := defaultOptions()
+const waitForSyncedDuration = 1 * time.Second
+
+func NewServer(ctx context.Context, appClient appclientset.Interface, namespace string, opts ...ServerOption) (*Server, error) {
+	s := &Server{
+		options:   defaultOptions(),
+		queues:    queue.NewSendRecvQueues(),
+		namespace: namespace,
+		noauth:    noAuthEndpoints,
+	}
+
+	s.ctx, s.ctxCancel = context.WithCancel(ctx)
+
 	for _, o := range opts {
-		err := o(options)
+		err := o(s)
 		if err != nil {
 			return nil, err
 		}
 	}
 
+	if s.authMethods == nil {
+		s.authMethods = auth.NewMethods()
+	}
+
+	var err error
+
 	// The server supports generating and using a volatile signing keys for the
 	// tokens it issues. This should not be used in production.
-	if options.signingKey == nil {
+	if s.options.signingKey == nil {
 		log().Warnf("Generating and using a volatile token signing key - multiple replicas not possible")
 		key, err := rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {
 			return nil, fmt.Errorf("could not generate signing key: %v", err)
 		}
-		options.signingKey = key
+		s.options.signingKey = key
 	}
 
-	issuer, err := issuer.NewIssuer("argocd-agent-server", issuer.WithRSAPrivateKey(options.signingKey))
+	s.issuer, err = issuer.NewIssuer("argocd-agent-server", issuer.WithRSAPrivateKey(s.options.signingKey))
 	if err != nil {
 		return nil, err
 	}
 
-	s := &Server{
-		options:     options,
-		authMethods: auth.NewMethods(),
-		queues:      queue.NewSendRecvQueues(),
-		namespace:   namespace,
-		issuer:      issuer,
-		noauth:      noAuthEndpoints,
-	}
-
 	informerOpts := []appinformer.AppInformerOption{
-		appinformer.WithNamespaces(options.namespaces...),
+		appinformer.WithNamespaces(s.options.namespaces...),
 		appinformer.WithNewAppCallback(s.newAppCallback),
+		appinformer.WithUpdateAppCallback(s.updateAppCallback),
+		appinformer.WithDeleteAppCallback(s.deleteAppCallback),
 	}
 
 	managerOpts := []application.ManagerOption{
@@ -93,12 +106,12 @@ func NewServer(appClient appclientset.Interface, namespace string, opts ...Serve
 		managerOpts = append(managerOpts, application.WithMetrics(metrics.NewApplicationClientMetrics()))
 	}
 
-	informer := appinformer.NewAppInformer(appClient,
+	s.informer = appinformer.NewAppInformer(s.ctx, appClient,
 		s.namespace,
 		informerOpts...,
 	)
 
-	s.appManager = application.NewManager(kubernetes.NewKubernetesBackend(appClient, informer),
+	s.appManager = application.NewManager(kubernetes.NewKubernetesBackend(appClient, s.informer),
 		managerOpts...,
 	)
 
@@ -109,7 +122,7 @@ func NewServer(appClient appclientset.Interface, namespace string, opts ...Serve
 // error during startup, before the go routines are running, will be returned
 // immediately. Errors during the runtime will be propagated via errch.
 func (s *Server) Start(ctx context.Context, errch chan error) error {
-	s.ctx, s.ctxCancel = context.WithCancel(ctx)
+	log().Infof("Starting %s (server) v%s (ns=%s, allowed_namespaces=%v)", version.Name(), version.Version(), s.namespace, s.options.namespaces)
 	if s.options.serveGRPC {
 		if err := s.serveGRPC(s.ctx, errch); err != nil {
 			return err
@@ -125,6 +138,14 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		return nil
 	}
 
+	// The application informer lives in its own go routine
+	go func() {
+		s.appManager.Backend.StartInformer(ctx)
+	}()
+
+	s.informer.EnsureSynced(waitForSyncedDuration)
+	log().Infof("Informer synced and ready")
+
 	return nil
 }
 
@@ -132,6 +153,8 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 // results in an error, an error is returned.
 func (s *Server) Shutdown() error {
 	var err error
+
+	log().Debugf("Shutdown requested")
 	// Cancel server-wide context
 	s.ctxCancel()
 
@@ -157,18 +180,39 @@ func (s *Server) Shutdown() error {
 }
 
 func (s *Server) loadTLSConfig() (*tls.Config, error) {
-	cert, err := tls.LoadX509KeyPair(s.options.tlsCert, s.options.tlsKey)
-	if err != nil {
-		return nil, fmt.Errorf("could not load X509 keypair: %w", err)
-	}
-	for _, c := range cert.Certificate {
-		cert, err := x509.ParseCertificate(c)
+	var cert tls.Certificate
+	var err error
+	if s.options.tlsCertPath != "" && s.options.tlsKeyPath != "" {
+		cert, err = tls.LoadX509KeyPair(s.options.tlsCertPath, s.options.tlsKeyPath)
 		if err != nil {
-			return nil, fmt.Errorf("could not parse certificate from %s: %w", s.options.tlsCert, err)
+			return nil, fmt.Errorf("could not load X509 keypair: %w", err)
 		}
-		if !cert.NotAfter.After(time.Now()) {
-			log().Warnf("Server certificate has expired on %s", cert.NotAfter.Format(time.RFC1123Z))
+		for _, c := range cert.Certificate {
+			cert, err := x509.ParseCertificate(c)
+			if err != nil {
+				return nil, fmt.Errorf("could not parse certificate from %s: %w", s.options.tlsCertPath, err)
+			}
+			if !cert.NotAfter.After(time.Now()) {
+				log().Warnf("Server certificate has expired on %s", cert.NotAfter.Format(time.RFC1123Z))
+			}
 		}
+	} else if s.options.tlsCert != nil && s.options.tlsKey != nil {
+		cBytes := &bytes.Buffer{}
+		kBytes := &bytes.Buffer{}
+		err := pem.Encode(cBytes, &pem.Block{Type: "CERTIFICATE", Bytes: s.options.tlsCert.Raw})
+		if err != nil {
+			return nil, fmt.Errorf("error encoding cert: %w", err)
+		}
+		err = pem.Encode(kBytes, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(s.options.tlsKey)})
+		if err != nil {
+			return nil, fmt.Errorf("error encoding key: %w", err)
+		}
+		cert, err = tls.X509KeyPair(cBytes.Bytes(), kBytes.Bytes())
+		if err != nil {
+			return nil, fmt.Errorf("error creating key pair: %w", err)
+		}
+	} else {
+		return nil, fmt.Errorf("TLS not configured")
 	}
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},

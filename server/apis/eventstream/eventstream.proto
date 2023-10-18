@@ -10,17 +10,17 @@ import "google/api/annotations.proto";
 import "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1/generated.proto";
 
 // EventType specifies the type of an event
-enum EventType {
-    Event_Unspecified = 0;
-    Event_NewApp = 1;
-    Event_UpdateApp = 2;
-    Event_DeleteApp = 3;
-}
+// enum EventType {
+//     Event_Unspecified = 0;
+//     Event_NewApp = 1;
+//     Event_UpdateApp = 2;
+//     Event_DeleteApp = 3;
+// }
 
 // Event describes an event
 message Event {
     // Event is the type of event
-    EventType event = 1;
+    int32 event = 1;
     // Application is the application of the event
     optional github.com.argoproj.argo_cd.v2.pkg.apis.application.v1alpha1.Application application = 2;
 }

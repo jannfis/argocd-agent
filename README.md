@@ -30,7 +30,7 @@ The following paragraphs describe the design principles upon which `argocd-agent
 
 It is understood that managed clusters can be everywhere: In your black-fibre connected data centres, across different cloud providers, in a car, on a ship, wherever. Not all these locations will have a permanent, reliable and low-latency network connection.
 
-Thus, `argocd-agent` is designed around the assumption that managed clusters are not always available, and might have problems keeping up a stable network connection.
+Thus, `argocd-agent` is designed around the assumption that the connection between managed clusters (agents) and the control plane is not always available, and that it might not be possible to keep up a stable, good performing network connection between the components. However, the system will benefit from a stable network connection with low latency.
 
 ### Managed clusters are and will stay autonomous
 
@@ -38,11 +38,25 @@ When the agent cannot reach the control plane, the agent's cluster still is able
 
 ### The initiating component is always the agent, not the control plane
 
-Connections are established in one direction only: from the agent to the control plane. 
+Connections are established in one direction only: from the agent to the control plane. The control plane does not need to exaxct details about the agents' systems.
 
 ### Security
 
-The control plane component of `argocd-agent` provides a gRPC API over HTTPS/2. The connections to the API require mutual TLS and strong authentication. The agent won't need access to the control plane's Kubernetes API, and the control plane component has limited capabilities on the cluster it is running in.
+The control plane component of `argocd-agent` provides a gRPC API over HTTPS/2. The connections to the API require mutual TLS and strong authentication. The agent won't need access to the control plane's Kubernetes API, and the control plane component has limited capabilities on the cluster it is running in. 
+
+## Agent operation mode
+
+`argocd-agent` can run in two distinct modes of operation: A *managed* mode and an *autonomous* mode. Both modes cater for different types of setups, and the control plane can handle a mixed-mode scenario where some of the agents run in managed mode, and others run in autonomous mode. However, an agent can only run in either of the modes. Having some parts on the agent's system in managed, and others in autonomous mode, is not supported.
+
+### Managed mode
+
+In *managed mode*, the agent receives all of its configuration from the control plane. For example, if you create a new Application on the control plane, the agent will pull this Application to its local Argo CD. Any local changes to this Application will be overwritten by the primary copy on the control plane.
+
+The agent will submit status updates for managed Applications, such as sync status and health, back to the control plane.
+
+### Autonomous mode
+
+In *autonomous mode*, the agent will not create or delete Applications on the agent's system. Instead, it is expected that the system runs in self-managed mode (i.e. Argo CD completely configured from Git, and all changes are made through Git). The agent will sync the state of the system to the control plane, so every CRUD operation through Argo CD on Applications will be reflected on the control plane.
 
 ## Status and current limitations
 

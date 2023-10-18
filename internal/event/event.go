@@ -6,7 +6,7 @@ import (
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 )
 
-type EventType int
+type EventType int32
 
 const (
 	EventTypeUnknown EventType = iota

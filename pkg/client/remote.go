@@ -57,6 +57,7 @@ type Remote struct {
 	creds        auth.Credentials
 	backoff      wait.Backoff
 	conn         *grpc.ClientConn
+	clientID     string
 	// timeouts   timeouts
 }
 
@@ -154,7 +155,7 @@ func NewRemote(hostname string, port int, opts ...RemoteOption) (*Remote, error)
 		backoff: wait.Backoff{
 			Steps:    math.MaxInt,
 			Duration: 1 * time.Second,
-			Factor:   1.5,
+			Factor:   2,
 			Cap:      1 * time.Minute,
 		},
 	}
@@ -195,12 +196,21 @@ func (r *Remote) retriable(err error) bool {
 }
 
 func (r *Remote) unaryAuthInterceptor(ctx context.Context, method string, req interface{}, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-	log().Infof("Outgoing call to %s", method)
+	log().Infof("Outgoing unary call to %s", method)
 	var nCtx context.Context = ctx
 	if r.accessToken != nil && r.accessToken.RawToken != "" {
 		nCtx = metadata.AppendToOutgoingContext(ctx, "authorization", r.accessToken.RawToken)
 	}
 	return invoker(nCtx, method, req, reply, cc, opts...)
+}
+
+func (r *Remote) streamAuthInterceptor(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	log().Infof("Outgoing stream call to %s", method)
+	var nCtx context.Context = ctx
+	if r.accessToken != nil && r.accessToken.RawToken != "" {
+		nCtx = metadata.AppendToOutgoingContext(ctx, "authorization", r.accessToken.RawToken)
+	}
+	return streamer(nCtx, desc, cc, method, opts...)
 }
 
 // Connect connects this Remote to the remote host and performs authentication.
@@ -222,6 +232,7 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		grpc.WithConnectParams(cparams),
 		grpc.WithUserAgent("argocd-agent/v0.0.1"),
 		grpc.WithUnaryInterceptor(r.unaryAuthInterceptor),
+		grpc.WithStreamInterceptor(r.streamAuthInterceptor),
 	}
 
 	conn, err := grpc.DialContext(ctx, r.Addr(), opts...)
@@ -245,18 +256,22 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		default:
 			resp, ierr := authC.Authenticate(ctx, &authapi.AuthRequest{Method: r.authMethod, Credentials: r.creds})
 			if ierr != nil {
-				logrus.Warnf("Auth failure: %v (%d retries left)", ierr, retries)
+				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, r.backoff.Step())
 				return ierr
 			}
 			r.accessToken, ierr = NewToken(resp.AccessToken)
-			if err != nil {
-				logrus.Warnf("Auth failure: %v (%d retries left)", ierr, retries)
+			if ierr != nil {
+				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, r.backoff.Step())
 				return ierr
 			}
 			r.refreshToken, ierr = NewToken(resp.RefreshToken)
-			if err != nil {
-				logrus.Warnf("Auth failure: %v (%d retries left)", ierr, retries)
+			if ierr != nil {
+				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, r.backoff.Step())
 				return ierr
+			}
+			r.clientID, ierr = r.accessToken.Claims.GetSubject()
+			if ierr != nil {
+				return err
 			}
 			return nil
 		}
@@ -265,6 +280,7 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		conn.Close()
 		return err
 	}
+	log().Infof("Authentication successful")
 	versionC := versionapi.NewVersionClient(conn)
 	vr, err := versionC.Version(ctx, &versionapi.VersionRequest{})
 	if err != nil {
@@ -274,6 +290,14 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 	log().Infof("Connected to %s", vr.Version)
 	r.conn = conn
 	return nil
+}
+
+func (r *Remote) Conn() *grpc.ClientConn {
+	return r.conn
+}
+
+func (r *Remote) ClientID() string {
+	return r.clientID
 }
 
 func log() *logrus.Entry {

@@ -22,7 +22,7 @@ func Test_Connect(t *testing.T) {
 	tempDir := t.TempDir()
 	basePath := path.Join(tempDir, "certs")
 	certs.WriteSelfSignedCert(t, basePath, x509.Certificate{SerialNumber: big.NewInt(1)})
-	s, err := server.NewServer(fakeappclient.NewSimpleClientset(), "default",
+	s, err := server.NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), "default",
 		server.WithGRPC(true),
 		server.WithListenerPort(0),
 		server.WithTLSKeyPair(basePath+".crt", basePath+".key"),

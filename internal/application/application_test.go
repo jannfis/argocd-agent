@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jannfis/argocd-agent/internal/backend/kubernetes"
 	"github.com/jannfis/argocd-agent/internal/metrics"
-	"github.com/jannfis/argocd-agent/server/backend/kubernetes"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -76,4 +76,65 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+}
+
+func Test_ManageApp(t *testing.T) {
+	t.Run("Mark app as managed", func(t *testing.T) {
+		appm := NewManager(nil)
+		assert.False(t, appm.IsManaged("foo"))
+		err := appm.Manage("foo")
+		assert.NoError(t, err)
+		assert.True(t, appm.IsManaged("foo"))
+		err = appm.Manage("foo")
+		assert.Error(t, err)
+		assert.True(t, appm.IsManaged("foo"))
+		appm.ClearManaged()
+		assert.False(t, appm.IsManaged("foo"))
+		assert.Len(t, appm.managedApps, 0)
+	})
+
+	t.Run("Mark app as unmanaged", func(t *testing.T) {
+		appm := NewManager(nil)
+		err := appm.Manage("foo")
+		assert.True(t, appm.IsManaged("foo"))
+		assert.NoError(t, err)
+		err = appm.Unmanage("foo")
+		assert.NoError(t, err)
+		assert.False(t, appm.IsManaged("foo"))
+		err = appm.Unmanage("foo")
+		assert.Error(t, err)
+		assert.False(t, appm.IsManaged("foo"))
+	})
+}
+
+func Test_IgnoreChange(t *testing.T) {
+	t.Run("Ignore a change", func(t *testing.T) {
+		appm := NewManager(nil)
+		assert.False(t, appm.IsChangeIgnored("foo", "1"))
+		err := appm.IgnoreChange("foo", "1")
+		assert.NoError(t, err)
+		assert.True(t, appm.IsChangeIgnored("foo", "1"))
+		err = appm.IgnoreChange("foo", "1")
+		assert.Error(t, err)
+		assert.True(t, appm.IsChangeIgnored("foo", "1"))
+		appm.ClearIgnored()
+		assert.False(t, appm.IsChangeIgnored("foo", "1"))
+		assert.Len(t, appm.managedApps, 0)
+	})
+
+	t.Run("Unignore a change", func(t *testing.T) {
+		appm := NewManager(nil)
+		err := appm.UnignoreChange("foo", "1")
+		assert.Error(t, err)
+		assert.False(t, appm.IsChangeIgnored("foo", "1"))
+		err = appm.IgnoreChange("foo", "1")
+		assert.NoError(t, err)
+		assert.True(t, appm.IsChangeIgnored("foo", "1"))
+		err = appm.UnignoreChange("foo", "1")
+		assert.NoError(t, err)
+		assert.False(t, appm.IsChangeIgnored("foo", "1"))
+		err = appm.UnignoreChange("foo", "1")
+		assert.Error(t, err)
+		assert.False(t, appm.IsChangeIgnored("foo", "1"))
+	})
 }

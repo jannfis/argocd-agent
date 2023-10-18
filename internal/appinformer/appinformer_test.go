@@ -39,7 +39,7 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Simple list callback", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1, app2)
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(fac, "test", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
+		inf := NewAppInformer(context.TODO(), fac, "test", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
 			eventCh <- true
 			return apps
 		}))
@@ -68,7 +68,7 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("List callback with filter", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1, app2)
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(fac, "test", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
+		inf := NewAppInformer(context.TODO(), fac, "test", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
 			eventCh <- true
 			return []v1alpha1.Application{*app1}
 		}))
@@ -103,7 +103,7 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Add callback", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset()
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(fac, "test", WithNewAppCallback(func(app *v1alpha1.Application) {
+		inf := NewAppInformer(context.TODO(), fac, "test", WithNewAppCallback(func(app *v1alpha1.Application) {
 			eventCh <- true
 		}))
 		stopCh := make(chan struct{})
@@ -138,7 +138,7 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Update callback", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1)
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(fac, "test", WithUpdateAppCallback(func(old *v1alpha1.Application, new *v1alpha1.Application) {
+		inf := NewAppInformer(context.TODO(), fac, "test", WithUpdateAppCallback(func(old *v1alpha1.Application, new *v1alpha1.Application) {
 			eventCh <- true
 		}))
 		stopCh := make(chan struct{})
@@ -173,7 +173,7 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Delete callback", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1)
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(fac, "test", WithDeleteAppCallback(func(app *v1alpha1.Application) {
+		inf := NewAppInformer(context.TODO(), fac, "test", WithDeleteAppCallback(func(app *v1alpha1.Application) {
 			eventCh <- true
 		}))
 		stopCh := make(chan struct{})
@@ -205,7 +205,7 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Test admission in forbidden namespace", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1)
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(fac, "default", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
+		inf := NewAppInformer(context.TODO(), fac, "default", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
 			eventCh <- true
 			return apps
 		}), WithNamespaces("kube-system"))
@@ -237,7 +237,7 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Test admission in allowed namespace", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1)
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(fac, "default", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
+		inf := NewAppInformer(context.TODO(), fac, "default", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
 			eventCh <- true
 			return apps
 		}), WithNamespaces("test"))
@@ -265,6 +265,42 @@ func Test_AppInformer(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, napp)
 	})
+}
+
+func Test_SetAppCallbacks(t *testing.T) {
+	t.Run("Add callback", func(t *testing.T) {
+		called := false
+		addFn := func(app *v1alpha1.Application) {
+			called = true
+		}
+		i := &AppInformer{options: &AppInformerOptions{}}
+		i.SetNewAppCallback(addFn)
+		i.NewAppCallback()(nil)
+		assert.True(t, called)
+	})
+
+	t.Run("Update callback", func(t *testing.T) {
+		called := false
+		updFn := func(old *v1alpha1.Application, new *v1alpha1.Application) {
+			called = true
+		}
+		i := &AppInformer{options: &AppInformerOptions{}}
+		i.SetUpdateAppCallback(updFn)
+		i.UpdateAppCallback()(nil, nil)
+		assert.True(t, called)
+	})
+
+	t.Run("Delete callback", func(t *testing.T) {
+		called := false
+		delFn := func(app *v1alpha1.Application) {
+			called = true
+		}
+		i := &AppInformer{options: &AppInformerOptions{}}
+		i.SetDeleteAppCallback(delFn)
+		i.DeleteAppCallback()(nil)
+		assert.True(t, called)
+	})
+
 }
 
 func init() {

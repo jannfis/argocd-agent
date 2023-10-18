@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
 	"os"
+	"time"
 
 	"github.com/jannfis/argocd-agent/cmd/cmd"
+	"github.com/jannfis/argocd-agent/internal/auth"
+	"github.com/jannfis/argocd-agent/internal/auth/userpass"
+	"github.com/jannfis/argocd-agent/server"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -11,24 +16,86 @@ import (
 
 func NewServerRunCommand() *cobra.Command {
 	var (
-		listenHost string
-		listenPort int
-		logLevel   string
+		listenHost        string
+		listenPort        int
+		logLevel          string
+		metricsPort       int
+		disableMetrics    bool
+		namespace         string
+		allowedNamespaces []string
+		kubeConfig        string
+		tlsCert           string
+		tlsKey            string
+		tlsGenerate       bool
+		userDB            string
 	)
 	var command = &cobra.Command{
 		Short: "Run the argocd-agent server component",
 		Run: func(c *cobra.Command, args []string) {
+			ctx, cancelFn := context.WithTimeout(context.Background(), 1*time.Hour)
+			defer cancelFn()
+
+			opts := []server.ServerOption{}
 			if logLevel != "" {
-				_, err := cmd.StringToLoglevel(logLevel)
+				lvl, err := cmd.StringToLoglevel(logLevel)
 				if err != nil {
 					cmd.Fatal("invalid log level: %s. Available levels are: %s", logLevel, cmd.AvailableLogLevels())
 				}
+				logrus.SetLevel(lvl)
 			}
+			kubeConfig, err := cmd.GetKubeConfig(ctx, namespace, kubeConfig)
+			if err != nil {
+				cmd.Fatal("Could not load Kubernetes config: %v", err)
+			}
+			opts = append(opts, server.WithListenerAddress(listenHost))
+			opts = append(opts, server.WithListenerPort(listenPort))
+			opts = append(opts, server.WithGRPC(true))
+			if !disableMetrics {
+				opts = append(opts, server.WithMetricsPort(metricsPort))
+			}
+			opts = append(opts, server.WithNamespaces(allowedNamespaces...))
+			if tlsCert != "" && tlsKey != "" {
+				opts = append(opts, server.WithTLSKeyPair(tlsCert, tlsKey))
+			} else if tlsGenerate {
+				opts = append(opts, server.WithGeneratedTLS("argocd-agent"))
+			}
+
+			authms := auth.NewMethods()
+			userauth := userpass.NewUserPassAuthentication()
+			if userDB != "" {
+				err = userauth.LoadAuthDataFromFile(userDB)
+				if err != nil {
+					cmd.Fatal("Could not load user database: %v", err)
+				}
+				authms.RegisterMethod("userpass", userauth)
+				opts = append(opts, server.WithAuthMethods(authms))
+			}
+
+			s, err := server.NewServer(ctx, kubeConfig.ApplicationsClientset, namespace, opts...)
+			if err != nil {
+				cmd.Fatal("Could not create new server instance: %v", err)
+			}
+			errch := make(chan error)
+			err = s.Start(ctx, errch)
+			if err != nil {
+				cmd.Fatal("Could not start server: %v", err)
+			}
+			<-ctx.Done()
 		},
 	}
 	command.Flags().StringVar(&listenHost, "listen-host", "", "Name of the host to listen on")
-	command.Flags().IntVar(&listenPort, "listen-port", 8443, "Port to listen on")
+	command.Flags().IntVar(&listenPort, "listen-port", 8443, "Port the gRPC server will listen on")
 	command.Flags().StringVar(&logLevel, "log-level", logrus.InfoLevel.String(), "The log level to use")
+	command.Flags().IntVar(&metricsPort, "metrics-port", 8000, "Port the metrics server will listen on")
+	command.Flags().BoolVar(&disableMetrics, "disable-metrics", false, "Disable metrics collection and metrics server")
+	command.Flags().StringVarP(&namespace, "namespace", "n", "", "The namespace the server will use for configuration. Set only when running out of cluster.")
+	command.Flags().StringSliceVar(&allowedNamespaces, "allowed-namespaces", []string{}, "List of namespaces the server is allowed to operate in")
+	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
+	command.Flags().StringVar(&tlsCert, "tls-cert", "", "Use TLS certificate from path")
+	command.Flags().StringVar(&tlsKey, "tls-key", "", "Use TLS private key from path")
+	command.Flags().BoolVar(&tlsGenerate, "insecure-tls-generate", false, "INSECURE: Generate and use temporary TLS cert and key")
+	command.Flags().StringVar(&userDB, "passwd", "", "Path to userpass passwd file")
+
 	return command
 }
 

@@ -133,7 +133,7 @@ func (s *Server) serveGRPC(ctx context.Context, errch chan error) error {
 		),
 	)
 
-	authapi.RegisterAuthenticationServer(s.grpcServer, auth.NewServer(s.authMethods, s.issuer))
+	authapi.RegisterAuthenticationServer(s.grpcServer, auth.NewServer(s.queues, s.authMethods, s.issuer))
 	versionapi.RegisterVersionServer(s.grpcServer, version.NewServer(s.authenticate))
 	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues))
 
@@ -141,11 +141,6 @@ func (s *Server) serveGRPC(ctx context.Context, errch chan error) error {
 	go func() {
 		err = s.grpcServer.Serve(s.listener.l)
 		errch <- err
-	}()
-
-	// The application informer lives in its own go routine
-	go func() {
-		s.appManager.Backend.StartInformer(ctx)
 	}()
 
 	return nil

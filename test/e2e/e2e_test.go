@@ -12,11 +12,15 @@ import (
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
+	"github.com/jannfis/argocd-agent/agent"
+	"github.com/jannfis/argocd-agent/internal/auth"
 	"github.com/jannfis/argocd-agent/internal/auth/userpass"
+	"github.com/jannfis/argocd-agent/internal/backend"
+	"github.com/jannfis/argocd-agent/internal/event"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/eventstreamapi"
+	"github.com/jannfis/argocd-agent/pkg/client"
 	"github.com/jannfis/argocd-agent/server"
-	"github.com/jannfis/argocd-agent/server/backend"
 	fakecerts "github.com/jannfis/argocd-agent/test/fake/certs"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -25,6 +29,8 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	fakekube "github.com/jannfis/argocd-agent/test/fake/kube"
 )
 
 var certTempl = x509.Certificate{
@@ -45,7 +51,7 @@ func newConn(t *testing.T, appC *fakeappclient.Clientset) (*grpc.ClientConn, *se
 	fakecerts.WriteSelfSignedCert(t, path.Join(tempDir, "test-cert"), templ)
 	errch := make(chan error)
 
-	s, err := server.NewServer(appC, testNamespace,
+	s, err := server.NewServer(context.TODO(), appC, testNamespace,
 		server.WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 		server.WithListenerPort(0),
 		server.WithListenerAddress("127.0.0.1"),
@@ -67,6 +73,14 @@ func newConn(t *testing.T, appC *fakeappclient.Clientset) (*grpc.ClientConn, *se
 		grpc.WithTransportCredentials(creds))
 	require.NoError(t, err)
 	return conn, s
+}
+
+func newServer(t *testing.T) *server.Server {
+	return nil
+}
+
+func newAgent(t *testing.T) *agent.Agent {
+	return nil
 }
 
 // func newStreamingClient(t *testing.T, conn) (eventstreamapi.EventStreamClient, *grpc.ClientConn) {
@@ -170,7 +184,7 @@ func Test_EndToEnd_Push(t *testing.T) {
 	start := time.Now()
 	for i := 0; i < 10; i += 1 {
 		pushc.Send(&eventstreamapi.Event{
-			Event: eventstreamapi.EventType_Event_UpdateApp,
+			Event: int32(event.EventTypeUpdateAppSpec),
 			Application: &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{
 				Name:      fmt.Sprintf("test%d", i),
 				Namespace: "default",
@@ -197,6 +211,75 @@ func Test_EndToEnd_Push(t *testing.T) {
 	apps, err := s.AppManager().Backend.List(context.Background(), backend.ApplicationSelector{})
 	assert.NoError(t, err)
 	assert.Len(t, apps, 10)
+}
+
+func Test_AgentServer(t *testing.T) {
+	app := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "testapp",
+			Namespace: "client",
+		},
+	}
+	sctx, scancel := context.WithTimeout(context.Background(), 20*time.Second)
+	actx, acancel := context.WithTimeout(context.Background(), 20*time.Second)
+	fakeAppcServer := fakeappclient.NewSimpleClientset()
+	am := auth.NewMethods()
+	up := userpass.NewUserPassAuthentication()
+	am.RegisterMethod("userpass", up)
+	up.UpsertUser("client", "insecure")
+	s, err := server.NewServer(sctx, fakeAppcServer, "server",
+		server.WithGRPC(true),
+		server.WithListenerPort(0),
+		server.WithServerName("control-plane"),
+		server.WithGeneratedTLS("control-plane"),
+		server.WithAuthMethods(am),
+		server.WithNamespaces("client"),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, s)
+	errch := make(chan error)
+	s.Start(sctx, errch)
+	defer scancel()
+	defer acancel()
+
+	remote, err := client.NewRemote(s.Listener().Host(), s.Listener().Port(),
+		client.WithInsecureSkipTLSVerify(),
+		client.WithAuth("userpass", auth.Credentials{userpass.ClientIDField: "client", userpass.ClientSecretField: "insecure"}),
+	)
+	require.NoError(t, err)
+	fakeAppcAgent := fakeappclient.NewSimpleClientset()
+	fakeKubecAgent := fakekube.NewFakeKubeClient()
+	a, err := agent.NewAgent(actx, fakeKubecAgent, fakeAppcAgent, "client",
+		agent.WithRemote(remote),
+	)
+	require.NotNil(t, a)
+	require.NoError(t, err)
+	a.Start(actx)
+	for !a.IsConnected() {
+		log().Infof("waiting to connect")
+		time.Sleep(100 * time.Millisecond)
+	}
+	log().Infof("Creating application")
+	_, err = fakeAppcServer.ArgoprojV1alpha1().Applications("client").Create(sctx, app, v1.CreateOptions{})
+	require.NoError(t, err)
+	for i := 0; i < 5; i += 1 {
+		app, err = fakeAppcServer.ArgoprojV1alpha1().Applications("client").Get(actx, "testapp", v1.GetOptions{})
+		if err == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	require.NoError(t, err)
+	require.NotNil(t, app)
+	app.Spec.Project = "hulahup"
+	time.Sleep(1 * time.Second)
+	_, err = fakeAppcServer.ArgoprojV1alpha1().Applications("client").Update(actx, app, v1.UpdateOptions{})
+	require.NoError(t, err)
+
+	<-sctx.Done()
+	<-actx.Done()
+	err = s.Shutdown()
+	require.NoError(t, err)
 }
 
 func log() *logrus.Entry {

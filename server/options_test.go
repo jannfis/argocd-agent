@@ -20,59 +20,59 @@ func Test_WithPort(t *testing.T) {
 	}
 
 	for _, tt := range ports {
-		opts := &ServerOptions{}
-		err := WithListenerPort(tt.port)(opts)
+		s := &Server{options: &ServerOptions{}}
+		err := WithListenerPort(tt.port)(s)
 		if tt.valid {
 			assert.NoErrorf(t, err, "port %d should be valid", tt.port)
-			assert.Equal(t, tt.port, opts.port)
+			assert.Equal(t, tt.port, s.options.port)
 		} else {
 			assert.Errorf(t, err, "port %d should be invalid", tt.port)
-			assert.Equal(t, 0, opts.port)
+			assert.Equal(t, 0, s.options.port)
 		}
 	}
 }
 
 func Test_WithListenerAddress(t *testing.T) {
-	opts := &ServerOptions{}
-	err := WithListenerAddress("127.0.0.1")(opts)
+	s := &Server{options: &ServerOptions{}}
+	err := WithListenerAddress("127.0.0.1")(s)
 	assert.NoError(t, err)
-	assert.Equal(t, "127.0.0.1", opts.address)
+	assert.Equal(t, "127.0.0.1", s.options.address)
 }
 
 func Test_WithTLSCipherSuite(t *testing.T) {
 	t.Run("All valid cipher suites", func(t *testing.T) {
 		for _, cs := range tls.CipherSuites() {
-			opts := &ServerOptions{}
-			err := WithTLSCipherSuite(cs.Name)(opts)
+			s := &Server{options: &ServerOptions{}}
+			err := WithTLSCipherSuite(cs.Name)(s)
 			assert.NoError(t, err)
-			assert.Equal(t, cs, opts.tlsCiphers)
+			assert.Equal(t, cs, s.options.tlsCiphers)
 		}
 	})
 
 	t.Run("Invalid cipher suite", func(t *testing.T) {
-		opts := &ServerOptions{}
-		err := WithTLSCipherSuite("cowabunga")(opts)
+		s := &Server{options: &ServerOptions{}}
+		err := WithTLSCipherSuite("cowabunga")(s)
 		assert.Error(t, err)
-		assert.Nil(t, opts.tlsCiphers)
+		assert.Nil(t, s.options.tlsCiphers)
 	})
 }
 
 func Test_WithMinimumTLSVersion(t *testing.T) {
 	t.Run("All valid minimum cipher suites", func(t *testing.T) {
 		for k, v := range supportedTLSVersion {
-			opts := &ServerOptions{}
-			err := WithMinimumTLSVersion(k)(opts)
+			s := &Server{options: &ServerOptions{}}
+			err := WithMinimumTLSVersion(k)(s)
 			assert.NoError(t, err)
-			assert.Equal(t, v, opts.tlsMinVersion)
+			assert.Equal(t, v, s.options.tlsMinVersion)
 		}
 	})
 
 	t.Run("Invalid minimum cipher suites", func(t *testing.T) {
 		for _, v := range []string{"tls1.0", "ssl3.0", "invalid", "tls"} {
-			opts := &ServerOptions{}
-			err := WithMinimumTLSVersion(v)(opts)
+			s := &Server{options: &ServerOptions{}}
+			err := WithMinimumTLSVersion(v)(s)
 			assert.Error(t, err)
-			assert.Equal(t, 0, opts.tlsMinVersion)
+			assert.Equal(t, 0, s.options.tlsMinVersion)
 		}
 	})
 }

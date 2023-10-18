@@ -42,7 +42,11 @@ func (s *MockEventServer) AddRecvHook(hook RecvHook) {
 }
 
 func (s *MockEventServer) Context() context.Context {
-	return context.WithValue(context.TODO(), types.ContextAgentIdentifier, s.AgentName)
+	if s.AgentName != "" {
+		return context.WithValue(context.TODO(), types.ContextAgentIdentifier, s.AgentName)
+	} else {
+		return context.TODO()
+	}
 }
 
 func (s *MockEventServer) Send(sub *eventstreamapi.Event) error {

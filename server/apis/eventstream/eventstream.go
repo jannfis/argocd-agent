@@ -6,7 +6,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/jannfis/argocd-agent/internal/event"
 	"github.com/jannfis/argocd-agent/internal/queue"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/eventstreamapi"
@@ -16,7 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type server struct {
+type Server struct {
 	eventstreamapi.UnimplementedEventStreamServer
 
 	options *ServerOptions
@@ -36,12 +35,12 @@ func WithMaxStreamDuration(d time.Duration) ServerOption {
 }
 
 // NewServer returns a new AppStream server instance with the given options
-func NewServer(queues *queue.SendRecvQueues, opts ...ServerOption) *server {
-	options := &ServerOptions{MaxStreamDuration: 500 * time.Millisecond}
+func NewServer(queues *queue.SendRecvQueues, opts ...ServerOption) *Server {
+	options := &ServerOptions{}
 	for _, o := range opts {
 		o(options)
 	}
-	return &server{
+	return &Server{
 		queues:  queues,
 		options: options,
 	}
@@ -57,34 +56,21 @@ func agentName(ctx context.Context) (string, error) {
 	return agentName, nil
 }
 
-func (s *server) recvSubscription(ctx context.Context, agentName string, subs eventstreamapi.EventStream_SubscribeServer) (cancel bool, err error) {
-	for {
-		u, err := subs.Recv()
-		if err != nil {
-			return true, err
-		}
-		q := s.queues.RecvQ(agentName)
-		if q == nil {
-			return true, nil
-		}
-
-		q.Add(u.Application)
-	}
-}
-
 // Subscribe implements a bi-directional stream to exchange application updates
 // between the agent and the server.
 //
 // The connection is kept open until the agent closes it, and the stream tries
 // to send updates to the agent as long as possible.
-func (s *server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) error {
+func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) error {
 	logCtx := log().WithField("method", "Subscribe")
 
 	var ctx context.Context
 	var cancelFn context.CancelFunc
 	if s.options.MaxStreamDuration > 0 {
+		logCtx.Tracef("StreamContext expires in %v", s.options.MaxStreamDuration)
 		ctx, cancelFn = context.WithTimeout(subs.Context(), s.options.MaxStreamDuration)
 	} else {
+		logCtx.Trace("StreamContext does not expire ")
 		ctx, cancelFn = context.WithCancel(subs.Context())
 	}
 	defer cancelFn()
@@ -100,16 +86,20 @@ func (s *server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	// We receive events in a dedicated go routine
 	go func() {
 		logCtx := logCtx.WithField("direction", "recv")
+		logCtx.Trace("Starting new go routine in receiving direction")
 		for {
 			logCtx.Tracef("Waiting to receive from channel")
 			u, err := subs.Recv()
 			if err != nil {
 				if err == io.EOF {
 					logCtx.Tracef("Remote end hung up")
+					cancelFn()
 				} else {
 					st, ok := status.FromError(err)
 					if !ok || (st.Code() != codes.DeadlineExceeded && st.Code() != codes.Canceled) {
 						logCtx.WithError(err).Error("Error receiving application update")
+					} else {
+						logCtx.WithError(err).Error("Unknown error")
 					}
 				}
 				cancelFn()
@@ -159,14 +149,15 @@ func (s *server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 					return
 				}
 
-				app, ok := item.(*v1alpha1.Application)
+				ev, ok := item.(event.Event)
 				if !ok {
 					logCtx.Warnf("invalid data in sendqueue")
 					continue
 				}
 
+				logCtx.Tracef("Sending an item to the event stream")
 				// A Send() on the stream is actually not blocking.
-				err := subs.Send(&eventstreamapi.Event{Application: app.DeepCopy()})
+				err := subs.Send(&eventstreamapi.Event{Event: int32(ev.Type), Application: ev.Application})
 				// TODO: How to handle errors on send?
 				if err != nil {
 					status, ok := status.FromError(err)
@@ -185,12 +176,13 @@ func (s *server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	}()
 
 	<-ctx.Done()
+	logCtx.Info("EventStream context done")
 	return nil
 }
 
 // Push implements a client-side stream to receive updates for the client's
 // Application resources.
-func (s *server) Push(pushs eventstreamapi.EventStream_PushServer) error {
+func (s *Server) Push(pushs eventstreamapi.EventStream_PushServer) error {
 	logCtx := log().WithField("method", "Push")
 
 	var ctx context.Context

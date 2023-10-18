@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jannfis/argocd-agent/internal/event"
 	"golang.org/x/sync/semaphore"
@@ -73,6 +74,8 @@ func (s *Server) StartEventProcessor(ctx context.Context) error {
 					}(n, q)
 				}
 			}
+			// Give the CPU a little rest
+			time.Sleep(10 * time.Millisecond)
 		}
 	}()
 

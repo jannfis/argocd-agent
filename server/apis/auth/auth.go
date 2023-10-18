@@ -6,17 +6,19 @@ import (
 
 	"github.com/jannfis/argocd-agent/internal/auth"
 	"github.com/jannfis/argocd-agent/internal/issuer"
+	"github.com/jannfis/argocd-agent/internal/queue"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-type server struct {
+type Server struct {
 	authapi.UnimplementedAuthenticationServer
 	authMethods *auth.Methods
 	issuer      issuer.Issuer
 	options     *ServerOptions
+	queues      *queue.SendRecvQueues
 }
 
 const (
@@ -38,14 +40,15 @@ type ServerOption func(o *ServerOptions) error
 
 // NewServer creates a new instance of an authentication server with the given
 // authentication methods and options.
-func NewServer(authMethods *auth.Methods, iss issuer.Issuer, opts ...ServerOption) *server {
-	s := &server{}
+func NewServer(queues *queue.SendRecvQueues, authMethods *auth.Methods, iss issuer.Issuer, opts ...ServerOption) *Server {
+	s := &Server{}
 	s.options = &ServerOptions{}
 	if authMethods != nil {
 		s.authMethods = authMethods
 	} else {
 		s.authMethods = auth.NewMethods()
 	}
+	s.queues = queues
 	s.issuer = iss
 	for _, o := range opts {
 		o(s.options)
@@ -53,7 +56,7 @@ func NewServer(authMethods *auth.Methods, iss issuer.Issuer, opts ...ServerOptio
 	return s
 }
 
-func (s *server) issueTokens(subject string, refresh bool) (accessToken string, refreshToken string, err error) {
+func (s *Server) issueTokens(subject string, refresh bool) (accessToken string, refreshToken string, err error) {
 	accessToken, err = s.issuer.IssueAccessToken(subject, accessTokenValidity)
 	if err != nil {
 		return "", "", status.Error(codes.Internal, "unable to generate a token")
@@ -72,7 +75,7 @@ func (s *server) issueTokens(subject string, refresh bool) (accessToken string, 
 //
 // A Server may support one or more authentication methods, and if the authz
 // request succeeds, a JWT will be issued to the client.
-func (s *server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*authapi.AuthResponse, error) {
+func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*authapi.AuthResponse, error) {
 	logCtx := log().WithField("method", "Authenticate").WithField("authmethod", ar.Method)
 	am := s.authMethods.Method(ar.Method)
 	if am == nil {
@@ -89,6 +92,12 @@ func (s *server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 		logCtx.WithError(err).Warnf("Unable to generate token")
 		return nil, errAuthenticationFailed
 	}
+	if !s.queues.HasQueuePair(clientID) {
+		err = s.queues.Create(clientID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &authapi.AuthResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
@@ -98,7 +107,7 @@ func (s *server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 // RefreshToken issues a new access token when the client presents a valid
 // refresh token. If the refresh token is only valid for 10 minutes or less,
 // a new refresh token will be issued as well.
-func (s *server) RefreshToken(ctx context.Context, r *authapi.RefreshTokenRequest) (*authapi.AuthResponse, error) {
+func (s *Server) RefreshToken(ctx context.Context, r *authapi.RefreshTokenRequest) (*authapi.AuthResponse, error) {
 	logCtx := log().WithField("method", "RefreshToken")
 	if r.RefreshToken == "" {
 		logCtx.Warn("No refresh token supplied")

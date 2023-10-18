@@ -74,6 +74,15 @@ func Test_Subscribe(t *testing.T) {
 		assert.Equal(t, 0, int(st.NumSent.Load()))
 	})
 
+	t.Run("Test no agent information in context", func(t *testing.T) {
+		qs := queue.NewSendRecvQueues()
+		qs.Create("default")
+		s := NewServer(qs)
+		st := &mock.MockEventServer{AgentName: ""}
+		err := s.Subscribe(st)
+		assert.Error(t, err)
+	})
+
 }
 
 func init() {

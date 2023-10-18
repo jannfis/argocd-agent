@@ -13,8 +13,15 @@ func (a *Agent) DefaultFilterChain() *filter.Chain {
 
 	// Admit based on namespace of the application
 	fc.AppendAdmitFilter(func(app *v1alpha1.Application) bool {
-		admit := glob.MatchStringInList(append([]string{a.opts.namespace}, a.opts.namespaces...), app.Namespace, false)
-		return admit
+		if !glob.MatchStringInList(append([]string{a.namespace}, a.options.namespaces...), app.Namespace, false) {
+			log().Warnf("namespace not allowed: %s", app.QualifiedName())
+			return false
+		}
+		// if a.managedApps.IsManaged(app.QualifiedName()) {
+		// 	log().Warnf("App is not managed: %s", app.QualifiedName())
+		// 	return false
+		// }
+		return true
 	})
 
 	return fc

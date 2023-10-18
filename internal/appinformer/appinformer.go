@@ -2,7 +2,10 @@ package appinformer
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
@@ -18,7 +21,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const defaultResyncPeriod = 1 * time.Hour
+const defaultResyncPeriod = 1 * time.Minute
 
 // AppInformer is a filtering and customizable SharedIndexInformer for Argo CD
 // Application resources in a cluster. It works across a configurable set of
@@ -32,6 +35,11 @@ type AppInformer struct {
 
 	Informer cache.SharedIndexInformer
 	Lister   applisters.ApplicationLister
+
+	lock sync.RWMutex
+
+	// synced indicates whether the informer is synced and the watch is set up
+	synced atomic.Bool
 }
 
 // ListAppsCallback is executed when the informer builds its cache. It receives
@@ -67,7 +75,7 @@ type DeleteAppCallback func(app *v1alpha1.Application)
 type ErrorCallback func(err error, fmt string, args ...string)
 
 // NewAppInformer returns a new application informer for a given namespace
-func NewAppInformer(client appclientset.Interface, namespace string, opts ...AppInformerOption) *AppInformer {
+func NewAppInformer(ctx context.Context, client appclientset.Interface, namespace string, opts ...AppInformerOption) *AppInformer {
 	o := &AppInformerOptions{
 		resync: defaultResyncPeriod,
 	}
@@ -75,7 +83,9 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 	for _, opt := range opts {
 		opt(o)
 	}
+
 	if len(o.namespaces) > 0 {
+		o.namespaces = append(o.namespaces, namespace)
 		o.namespace = ""
 	} else {
 		o.namespace = namespace
@@ -88,7 +98,7 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
 				logCtx := log().WithField("component", "ListWatch")
 				logCtx.Debugf("Listing apps into cache")
-				appList, err := i.appClient.ArgoprojV1alpha1().Applications(o.namespace).List(context.TODO(), options)
+				appList, err := i.appClient.ArgoprojV1alpha1().Applications(o.namespace).List(ctx, options)
 				if err != nil {
 					logCtx.Warnf("Error listing apps: %v", err)
 					return nil, err
@@ -111,20 +121,22 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 				// The pre-filtered list is passed to the configured callback
 				// to perform custom filtering and tranformation.
 				if i.options.listCb != nil {
-					newItems := i.options.listCb(preFilteredItems)
-					appList.Items = newItems
+					preFilteredItems = i.options.listCb(preFilteredItems)
 				}
+				appList.Items = preFilteredItems
 
 				if i.options.appMetrics != nil {
 					i.options.appMetrics.AppsWatched.Set(float64(len(appList.Items)))
 				}
-
+				logCtx.Tracef("Listed %d applications", len(appList.Items))
 				return appList, err
 			},
 			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
+				i.synced.Store(false)
 				logCtx := log().WithField("component", "WatchFunc")
 				logCtx.Info("Starting application watcher")
-				return i.appClient.ArgoprojV1alpha1().Applications(namespace).Watch(context.TODO(), options)
+				defer i.synced.Store(true)
+				return i.appClient.ArgoprojV1alpha1().Applications(o.namespace).Watch(ctx, options)
 			},
 		},
 		&v1alpha1.Application{},
@@ -138,8 +150,6 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 	i.Informer.AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				logCtx := log().WithField("component", "AddFunc")
-				logCtx.Tracef("New application event")
 				app, ok := obj.(*v1alpha1.Application)
 				if !ok || app == nil {
 					// if i.options.errorCb != nil {
@@ -147,6 +157,8 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 					// }
 					return
 				}
+				logCtx := log().WithFields(logrus.Fields{"component": "AddFunc", "application": app.QualifiedName()}) //WithField("component", "AddFunc").WithF
+				logCtx.Tracef("New application event")
 				if !i.shouldProcessApp(app) {
 					return
 				}
@@ -187,8 +199,9 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 					logCtx.Debugf("Change will not be processed")
 					return
 				}
-				if i.options.updateCb != nil {
-					i.options.updateCb(oldApp, newApp)
+				updateCb := i.UpdateAppCallback()
+				if updateCb != nil {
+					updateCb(oldApp, newApp)
 				}
 				if i.options.appMetrics != nil {
 					i.options.appMetrics.AppsUpdated.Inc()
@@ -227,6 +240,7 @@ func NewAppInformer(client appclientset.Interface, namespace string, opts ...App
 func (i *AppInformer) Start(stopch <-chan struct{}) {
 	log().Infof("Starting app informer (namespaces: %s)", strings.Join(append([]string{i.options.namespace}, i.options.namespaces...), ","))
 	i.Informer.Run(stopch)
+	log().Infof("App informer has shutdown")
 }
 
 // shouldProcessApp returns true if the app is allowed to be processed
@@ -235,8 +249,68 @@ func (i *AppInformer) shouldProcessApp(app *v1alpha1.Application) bool {
 		i.options.filters.Admit(app)
 }
 
+// NewAppCallback returns the new application callback of the AppInformer
+func (i *AppInformer) NewAppCallback() NewAppCallback {
+	i.lock.RLock()
+	defer i.lock.RUnlock()
+	return i.options.newCb
+}
+
+// SetNewAppCallback sets the new application callback for the AppInformer
+func (i *AppInformer) SetNewAppCallback(cb NewAppCallback) {
+	i.lock.Lock()
+	defer i.lock.Unlock()
+	i.options.newCb = cb
+}
+
+// UpdateAppCallback returns the update application callback of the AppInformer
+func (i *AppInformer) UpdateAppCallback() UpdateAppCallback {
+	i.lock.RLock()
+	defer i.lock.RUnlock()
+	return i.options.updateCb
+}
+
+// SetUpdateAppCallback sets the update application callback for the AppInformer
+func (i *AppInformer) SetUpdateAppCallback(cb UpdateAppCallback) {
+	i.lock.Lock()
+	defer i.lock.Unlock()
+	i.options.updateCb = cb
+}
+
+// DeleteAppCallback returns the delete application callback of the AppInformer
+func (i *AppInformer) DeleteAppCallback() DeleteAppCallback {
+	i.lock.RLock()
+	defer i.lock.RUnlock()
+	return i.options.deleteCb
+}
+
+// SetDeleteAppCallback sets the delete application callback for the AppInformer
+func (i *AppInformer) SetDeleteAppCallback(cb DeleteAppCallback) {
+	i.lock.Lock()
+	defer i.lock.Unlock()
+	i.options.deleteCb = cb
+}
+
+// EnsureSynced waits until either the AppInformer has fully synced or the
+// timeout has been reached. In the latter case, an error will be returned.
+// Note that this call blocks until either situation arises.
+func (i *AppInformer) EnsureSynced(d time.Duration) error {
+	tckr := time.NewTicker(d)
+	for {
+		select {
+		case <-tckr.C:
+			return fmt.Errorf("sync timeout reached")
+		default:
+			if i.synced.Load() {
+				return nil
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func log() *logrus.Entry {
-	return logrus.WithField("module", "informer")
+	return logrus.WithField("module", "AppInformer")
 }
 
 func init() {
