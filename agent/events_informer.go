@@ -46,7 +46,7 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 		return
 	}
 
-	q := a.queues.SendQ(defaultQueueName)
+	q := a.queues.SendQ(a.remote.ClientID())
 	if q == nil {
 		logCtx.Error("Default queue disappeared!")
 		return
@@ -57,7 +57,7 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 	}
 
 	q.Add(ev)
-	logCtx.WithField("sendq_len", q.Len()).Debugf("Added app create event to send queue")
+	logCtx.WithField("sendq_len", q.Len()).WithField("sendq_name", a.remote.ClientID()).Debugf("Added app create event to send queue")
 }
 
 // addAppUpdateToQueue processes an application update event originating from
@@ -102,7 +102,7 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 		return
 	}
 
-	q := a.queues.SendQ(defaultQueueName)
+	q := a.queues.SendQ(a.remote.ClientID())
 	if q == nil {
 		logCtx.Error("Default queue disappeared!")
 		return
@@ -113,7 +113,7 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 	}
 
 	q.Add(ev)
-	logCtx.WithField("sendq_len", q.Len()).Debugf("Added app update event to send queue")
+	logCtx.WithField("sendq_len", q.Len()).WithField("sendq_name", a.remote.ClientID()).Debugf("Added app update event to send queue")
 }
 
 // addAppDeletionToQueue processes an application delete event originating from
@@ -133,7 +133,7 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 		logCtx.Tracef("App is not managed")
 	}
 
-	q := a.queues.SendQ(defaultQueueName)
+	q := a.queues.SendQ(a.remote.ClientID())
 	if q == nil {
 		logCtx.Error("Default queue disappeared!")
 		return

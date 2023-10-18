@@ -78,19 +78,23 @@ func (m *Manager) Create(ctx context.Context, app *v1alpha1.Application) error {
 func (m *Manager) UpdateStatus(ctx context.Context, app *v1alpha1.Application) error {
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		logCtx := log().WithField("component", "UpdateStatus")
-		exApp, err := m.Backend.Get(ctx, app.Name, app.Namespace)
-		if err != nil {
-			if errors.IsNotFound(err) && m.AllowUpsert {
+		exApp, ierr := m.Backend.Get(ctx, app.Name, app.Namespace)
+		if ierr != nil {
+			if errors.IsNotFound(ierr) && m.AllowUpsert {
 				logCtx.WithField("application", app.QualifiedName()).Infof("Creating application")
 				return m.Create(ctx, app)
 			} else {
-				return fmt.Errorf("could not get app %s: %w", app.QualifiedName(), err)
+				return fmt.Errorf("could not get app %s: %w", app.QualifiedName(), ierr)
 			}
 		} else {
 			exApp.Status = *app.Status.DeepCopy()
-			_, err = m.Backend.Update(ctx, exApp)
+			var napp *v1alpha1.Application
+			napp, ierr = m.Backend.Update(ctx, exApp)
+			if ierr == nil {
+				m.IgnoreChange(napp.QualifiedName(), napp.ResourceVersion)
+			}
 		}
-		return err
+		return ierr
 	})
 	if err == nil {
 		if m.Metrics != nil {

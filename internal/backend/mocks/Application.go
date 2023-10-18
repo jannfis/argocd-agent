@@ -5,7 +5,7 @@ package mocks
 import (
 	context "context"
 
-	backend "github.com/jannfis/argocd-agent/server/backend"
+	backend "github.com/jannfis/argocd-agent/internal/backend"
 
 	mock "github.com/stretchr/testify/mock"
 

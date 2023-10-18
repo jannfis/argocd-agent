@@ -27,6 +27,11 @@ func (s *Server) newAppCallback(app *v1alpha1.Application) {
 
 func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Application) {
 	logCtx := log().WithField("component", "UpdateAppCallback")
+	if s.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
+		logCtx.Debugf("Ignoring this change for resource version %s", new.ResourceVersion)
+		s.appManager.UnignoreChange(new.QualifiedName(), new.ResourceVersion)
+		return
+	}
 	if !s.queues.HasQueuePair(old.Namespace) {
 		logCtx.Tracef("no agent connected to namespace %s, discarding", old.Namespace)
 		return
