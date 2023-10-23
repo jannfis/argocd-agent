@@ -14,18 +14,13 @@ import (
 	"github.com/jannfis/argocd-agent/internal/queue"
 	"github.com/jannfis/argocd-agent/internal/version"
 	"github.com/jannfis/argocd-agent/pkg/client"
+	"github.com/jannfis/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
-)
-
-const (
-	AgentModeNone = iota
-	AgentModeManaged
-	AgentModeAutonomous
 )
 
 const waitForSyncedDuration = 1 * time.Second
@@ -46,6 +41,7 @@ type Agent struct {
 	syncCh            chan bool
 	remote            *client.Remote
 	appManager        *application.Manager
+	mode              types.AgentMode
 
 	queues *queue.SendRecvQueues
 
@@ -81,6 +77,7 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 	a.appclient = appclient
 	a.infStopCh = make(chan struct{})
 	a.namespace = namespace
+	a.mode = types.AgentModeAutonomous
 
 	for _, o := range opts {
 		err := o(a)
@@ -106,8 +103,9 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 		appinformer.WithFilterChain(a.DefaultFilterChain()),
 	)
 
+	// The agent only supports Kubernetes as application backend
 	a.appManager = application.NewManager(
-		kube_backend.NewKubernetesBackend(a.appclient, a.informer),
+		kube_backend.NewKubernetesBackend(a.appclient, a.informer, true),
 	)
 
 	a.syncCh = make(chan bool, 1)
@@ -116,7 +114,7 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 
 func (a *Agent) Start(ctx context.Context) error {
 	infCtx, cancelFn := context.WithCancel(ctx)
-	log().Infof("Starting %s (agent) v%s (ns=%s, allowed_namespaces=%v)", version.Name(), version.Version(), a.namespace, a.options.namespaces)
+	log().Infof("Starting %s (agent) v%s (ns=%s, allowed_namespaces=%v, mode=%s)", version.Name(), version.Version(), a.namespace, a.options.namespaces, a.mode)
 	a.context = infCtx
 	a.cancelFn = cancelFn
 	go func() {
@@ -124,6 +122,7 @@ func (a *Agent) Start(ctx context.Context) error {
 		log().Warnf("Informer has exited")
 	}()
 	if a.remote != nil {
+		a.remote.SetClientMode(a.mode)
 		a.maintainConnection()
 	}
 
@@ -156,7 +155,7 @@ func (a *Agent) Stop() error {
 }
 
 func (a *Agent) IsConnected() bool {
-	return a.connected.Load()
+	return a.remote != nil && a.connected.Load()
 }
 
 func log() *logrus.Entry {

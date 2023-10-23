@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/jannfis/argocd-agent/internal/auth"
@@ -19,6 +21,11 @@ type Server struct {
 	issuer      issuer.Issuer
 	options     *ServerOptions
 	queues      *queue.SendRecvQueues
+}
+
+type AuthSubject struct {
+	ClientID string `json:"clientID"`
+	Mode     string `json:"mode"`
 }
 
 const (
@@ -56,13 +63,17 @@ func NewServer(queues *queue.SendRecvQueues, authMethods *auth.Methods, iss issu
 	return s
 }
 
-func (s *Server) issueTokens(subject string, refresh bool) (accessToken string, refreshToken string, err error) {
-	accessToken, err = s.issuer.IssueAccessToken(subject, accessTokenValidity)
+func (s *Server) issueTokens(subject *AuthSubject, refresh bool) (accessToken string, refreshToken string, err error) {
+	subj, err := json.Marshal(subject)
+	if err != nil {
+		return "", "", fmt.Errorf("could not render subject to JSON: %w", err)
+	}
+	accessToken, err = s.issuer.IssueAccessToken(string(subj), accessTokenValidity)
 	if err != nil {
 		return "", "", status.Error(codes.Internal, "unable to generate a token")
 	}
 	if refresh {
-		refreshToken, err = s.issuer.IssueRefreshToken(subject, refreshTokenValidity)
+		refreshToken, err = s.issuer.IssueRefreshToken(string(subj), refreshTokenValidity)
 		if err != nil {
 			return "", "", status.Error(codes.Internal, "unable to generate a token")
 		}
@@ -77,6 +88,12 @@ func (s *Server) issueTokens(subject string, refresh bool) (accessToken string, 
 // request succeeds, a JWT will be issued to the client.
 func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*authapi.AuthResponse, error) {
 	logCtx := log().WithField("method", "Authenticate").WithField("authmethod", ar.Method)
+	switch ar.Mode {
+	case "managed", "autonomous":
+		break
+	default:
+		return nil, fmt.Errorf("unknown or missing operation mode: '%s'", ar.Mode)
+	}
 	am := s.authMethods.Method(ar.Method)
 	if am == nil {
 		logCtx.Info("unknown authentication method")
@@ -87,7 +104,8 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 		logCtx.WithError(err).WithField("client", clientID).Info("client authentication failed")
 		return nil, errAuthenticationFailed
 	}
-	accessToken, refreshToken, err := s.issueTokens(clientID, true)
+	subject := &AuthSubject{ClientID: clientID, Mode: ar.Mode}
+	accessToken, refreshToken, err := s.issueTokens(subject, true)
 	if err != nil {
 		logCtx.WithError(err).Warnf("Unable to generate token")
 		return nil, errAuthenticationFailed
@@ -126,6 +144,11 @@ func (s *Server) RefreshToken(ctx context.Context, r *authapi.RefreshTokenReques
 		logCtx.WithError(err).Warnf("Could not get subject from refresh token")
 		return nil, errAuthenticationFailed
 	}
+	subject := &AuthSubject{}
+	err = json.Unmarshal([]byte(subj), subject)
+	if err != nil {
+		return nil, fmt.Errorf("could not unmarshal subject: %w", err)
+	}
 
 	// We only want to issue a new refresh token when the old one is close to
 	// expiry.
@@ -139,7 +162,7 @@ func (s *Server) RefreshToken(ctx context.Context, r *authapi.RefreshTokenReques
 		refresh = true
 	}
 
-	accessToken, refreshToken, err := s.issueTokens(subj, refresh)
+	accessToken, refreshToken, err := s.issueTokens(subject, refresh)
 	if err != nil {
 		logCtx.WithError(err).WithField("refresh", refresh).Warnf("Could not issue a new token")
 		return nil, errAuthenticationFailed

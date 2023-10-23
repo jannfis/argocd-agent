@@ -45,7 +45,7 @@ func Test_AppInformer(t *testing.T) {
 		}))
 		stopCh := make(chan struct{})
 		go func() {
-			inf.Informer.Run(stopCh)
+			inf.AppInformer.Run(stopCh)
 		}()
 		ticker := time.NewTicker(1 * time.Second)
 		running := true
@@ -60,7 +60,7 @@ func Test_AppInformer(t *testing.T) {
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
-		apps, err := inf.Lister.Applications(inf.options.namespace).List(labels.Everything())
+		apps, err := inf.AppLister.Applications(inf.options.namespace).List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 2)
 	})
@@ -74,7 +74,7 @@ func Test_AppInformer(t *testing.T) {
 		}))
 		stopCh := make(chan struct{})
 		go func() {
-			inf.Informer.Run(stopCh)
+			inf.AppInformer.Run(stopCh)
 		}()
 		ticker := time.NewTicker(1 * time.Second)
 		running := true
@@ -89,13 +89,13 @@ func Test_AppInformer(t *testing.T) {
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
-		apps, err := inf.Lister.Applications(inf.options.namespace).List(labels.Everything())
+		apps, err := inf.AppLister.Applications(inf.options.namespace).List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 1)
-		app, err := inf.Lister.Applications(inf.options.namespace).Get("test1")
+		app, err := inf.AppLister.Applications(inf.options.namespace).Get("test1")
 		assert.NoError(t, err)
 		assert.NotNil(t, app)
-		app, err = inf.Lister.Applications(inf.options.namespace).Get("test2")
+		app, err = inf.AppLister.Applications(inf.options.namespace).Get("test2")
 		assert.ErrorContains(t, err, "not found")
 		assert.Nil(t, app)
 	})
@@ -108,7 +108,7 @@ func Test_AppInformer(t *testing.T) {
 		}))
 		stopCh := make(chan struct{})
 		go func() {
-			inf.Informer.Run(stopCh)
+			inf.AppInformer.Run(stopCh)
 		}()
 		ticker := time.NewTicker(1 * time.Second)
 		running := true
@@ -124,13 +124,13 @@ func Test_AppInformer(t *testing.T) {
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
-		apps, err := inf.Lister.Applications(inf.options.namespace).List(labels.Everything())
+		apps, err := inf.AppLister.Applications(inf.options.namespace).List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 1)
-		app, err := inf.Lister.Applications(inf.options.namespace).Get("test1")
+		app, err := inf.AppLister.Applications(inf.options.namespace).Get("test1")
 		assert.NoError(t, err)
 		assert.NotNil(t, app)
-		app, err = inf.Lister.Applications(inf.options.namespace).Get("test2")
+		app, err = inf.AppLister.Applications(inf.options.namespace).Get("test2")
 		assert.ErrorContains(t, err, "not found")
 		assert.Nil(t, app)
 	})
@@ -143,7 +143,7 @@ func Test_AppInformer(t *testing.T) {
 		}))
 		stopCh := make(chan struct{})
 		go func() {
-			inf.Informer.Run(stopCh)
+			inf.AppInformer.Run(stopCh)
 		}()
 		ticker := time.NewTicker(2 * time.Second)
 		running := true
@@ -161,10 +161,10 @@ func Test_AppInformer(t *testing.T) {
 				fac.ArgoprojV1alpha1().Applications(inf.options.namespace).Update(context.TODO(), appc, v1.UpdateOptions{})
 			}
 		}
-		apps, err := inf.Lister.Applications(inf.options.namespace).List(labels.Everything())
+		apps, err := inf.AppLister.Applications(inf.options.namespace).List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 1)
-		napp, err := inf.Lister.Applications(inf.options.namespace).Get("test1")
+		napp, err := inf.AppLister.Applications(inf.options.namespace).Get("test1")
 		assert.NoError(t, err)
 		assert.NotNil(t, napp)
 		assert.Equal(t, "hello", napp.Spec.Project)
@@ -178,7 +178,7 @@ func Test_AppInformer(t *testing.T) {
 		}))
 		stopCh := make(chan struct{})
 		go func() {
-			inf.Informer.Run(stopCh)
+			inf.AppInformer.Run(stopCh)
 		}()
 		ticker := time.NewTicker(2 * time.Second)
 		running := true
@@ -194,10 +194,10 @@ func Test_AppInformer(t *testing.T) {
 				fac.ArgoprojV1alpha1().Applications(inf.options.namespace).Delete(context.TODO(), "test1", v1.DeleteOptions{})
 			}
 		}
-		apps, err := inf.Lister.Applications(inf.options.namespace).List(labels.Everything())
+		apps, err := inf.AppLister.Applications(inf.options.namespace).List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 0)
-		napp, err := inf.Lister.Applications(inf.options.namespace).Get("test1")
+		napp, err := inf.AppLister.Applications(inf.options.namespace).Get("test1")
 		assert.ErrorContains(t, err, "not found")
 		assert.Nil(t, napp)
 	})
@@ -211,7 +211,7 @@ func Test_AppInformer(t *testing.T) {
 		}), WithNamespaces("kube-system"))
 		stopCh := make(chan struct{})
 		go func() {
-			inf.Informer.Run(stopCh)
+			inf.AppInformer.Run(stopCh)
 		}()
 		ticker := time.NewTicker(2 * time.Second)
 		running := true
@@ -226,10 +226,10 @@ func Test_AppInformer(t *testing.T) {
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
-		apps, err := inf.Lister.Applications("").List(labels.Everything())
+		apps, err := inf.AppLister.Applications("").List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 0)
-		napp, err := inf.Lister.Applications("").Get("test1")
+		napp, err := inf.AppLister.Applications("").Get("test1")
 		assert.ErrorContains(t, err, "not found")
 		assert.Nil(t, napp)
 	})
@@ -243,7 +243,7 @@ func Test_AppInformer(t *testing.T) {
 		}), WithNamespaces("test"))
 		stopCh := make(chan struct{})
 		go func() {
-			inf.Informer.Run(stopCh)
+			inf.AppInformer.Run(stopCh)
 		}()
 		ticker := time.NewTicker(2 * time.Second)
 		running := true
@@ -258,10 +258,10 @@ func Test_AppInformer(t *testing.T) {
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
-		apps, err := inf.Lister.Applications("").List(labels.Everything())
+		apps, err := inf.AppLister.Applications("").List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 1)
-		napp, err := inf.Lister.Applications("test").Get("test1")
+		napp, err := inf.AppLister.Applications("test").Get("test1")
 		assert.NoError(t, err)
 		assert.NotNil(t, napp)
 	})

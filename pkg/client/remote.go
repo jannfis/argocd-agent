@@ -13,6 +13,7 @@ import (
 	"github.com/jannfis/argocd-agent/internal/auth"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/versionapi"
+	"github.com/jannfis/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -58,6 +59,7 @@ type Remote struct {
 	backoff      wait.Backoff
 	conn         *grpc.ClientConn
 	clientID     string
+	clientMode   types.AgentMode
 	// timeouts   timeouts
 }
 
@@ -147,6 +149,13 @@ func WithAuth(method string, creds auth.Credentials) RemoteOption {
 	}
 }
 
+func WithClientMode(mode types.AgentMode) RemoteOption {
+	return func(r *Remote) error {
+		r.clientMode = mode
+		return nil
+	}
+}
+
 func NewRemote(hostname string, port int, opts ...RemoteOption) (*Remote, error) {
 	r := &Remote{
 		hostname:  hostname,
@@ -158,6 +167,7 @@ func NewRemote(hostname string, port int, opts ...RemoteOption) (*Remote, error)
 			Factor:   2,
 			Cap:      1 * time.Minute,
 		},
+		clientMode: types.AgentModeAutonomous,
 	}
 	for _, o := range opts {
 		if err := o(r); err != nil {
@@ -254,7 +264,7 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		case <-ctx.Done():
 			return status.Error(codes.Canceled, "context canceled")
 		default:
-			resp, ierr := authC.Authenticate(ctx, &authapi.AuthRequest{Method: r.authMethod, Credentials: r.creds})
+			resp, ierr := authC.Authenticate(ctx, &authapi.AuthRequest{Method: r.authMethod, Credentials: r.creds, Mode: r.clientMode.String()})
 			if ierr != nil {
 				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, r.backoff.Step())
 				return ierr
@@ -298,6 +308,10 @@ func (r *Remote) Conn() *grpc.ClientConn {
 
 func (r *Remote) ClientID() string {
 	return r.clientID
+}
+
+func (r *Remote) SetClientMode(mode types.AgentMode) {
+	r.clientMode = mode
 }
 
 func log() *logrus.Entry {

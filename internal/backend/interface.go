@@ -22,5 +22,7 @@ type Application interface {
 	Get(ctx context.Context, name string, namespace string) (*v1alpha1.Application, error)
 	Delete(ctx context.Context, name string, namespace string) error
 	Update(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error)
+	Patch(ctx context.Context, name string, namespace string, patch []byte) (*v1alpha1.Application, error)
+	SupportsPatch() bool
 	StartInformer(ctx context.Context)
 }

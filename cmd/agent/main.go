@@ -77,6 +77,7 @@ func NewAgentRunCommand() *cobra.Command {
 				cmd.Fatal("Could not load Kubernetes config: %v", err)
 			}
 			agentOpts = append(agentOpts, agent.WithRemote(remote))
+			agentOpts = append(agentOpts, agent.WithMode(agentMode))
 			ag, err := agent.NewAgent(ctx, kubeConfig.Clientset, kubeConfig.ApplicationsClientset, namespace, agentOpts...)
 			if err != nil {
 				cmd.Fatal("Could not create a new agent instance: %v", err)
@@ -93,7 +94,7 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringVar(&rootCAPath, "root-ca-path", "", "Path to a file containing root CA certificate for verifying remote TLS")
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVarP(&namespace, "namespace", "n", "argocd", "Namespace to manage applications in")
-	command.Flags().StringVar(&agentMode, "agent-mode", "managed", "Mode of operation")
+	command.Flags().StringVar(&agentMode, "agent-mode", "autonomous", "Mode of operation")
 	command.Flags().StringVar(&creds, "creds", "", "Credentials to use when connecting to server")
 	return command
 }

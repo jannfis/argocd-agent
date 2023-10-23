@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
@@ -21,25 +22,30 @@ import (
 	"github.com/jannfis/argocd-agent/internal/metrics"
 	"github.com/jannfis/argocd-agent/internal/queue"
 	"github.com/jannfis/argocd-agent/internal/version"
+	"github.com/jannfis/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
 
 type Server struct {
-	options     *ServerOptions
-	tlsConfig   *tls.Config
-	listener    *Listener
-	server      *http.Server
-	grpcServer  *grpc.Server
-	authMethods *auth.Methods
-	queues      *queue.SendRecvQueues
-	namespace   string
-	issuer      issuer.Issuer
-	noauth      map[string]bool // noauth contains endpoints accessible without authentication
-	ctx         context.Context
-	ctxCancel   context.CancelFunc
-	appManager  *application.Manager
-	informer    *appinformer.AppInformer
+	options      *ServerOptions
+	tlsConfig    *tls.Config
+	listener     *Listener
+	server       *http.Server
+	grpcServer   *grpc.Server
+	authMethods  *auth.Methods
+	queues       *queue.SendRecvQueues
+	namespace    string
+	issuer       issuer.Issuer
+	noauth       map[string]bool // noauth contains endpoints accessible without authentication
+	ctx          context.Context
+	ctxCancel    context.CancelFunc
+	appManager   *application.Manager
+	informer     *appinformer.AppInformer
+	watchLock    sync.RWMutex
+	clientMap    map[string]string
+	namespaceMap map[string]types.AgentMode
+	clientLock   sync.RWMutex
 }
 
 // noAuthEndpoints is a list of endpoints that are available without the need
@@ -111,9 +117,16 @@ func NewServer(ctx context.Context, appClient appclientset.Interface, namespace 
 		informerOpts...,
 	)
 
-	s.appManager = application.NewManager(kubernetes.NewKubernetesBackend(appClient, s.informer),
+	s.appManager = application.NewManager(kubernetes.NewKubernetesBackend(appClient, s.informer, true),
 		managerOpts...,
 	)
+
+	s.clientMap = map[string]string{
+		`{"clientID":"argocd","mode":"autonomous"}`: "argocd",
+	}
+	s.namespaceMap = map[string]types.AgentMode{
+		"argocd": types.AgentModeAutonomous,
+	}
 
 	return s, nil
 }
@@ -140,7 +153,7 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 
 	// The application informer lives in its own go routine
 	go func() {
-		s.appManager.Backend.StartInformer(ctx)
+		s.appManager.Application.StartInformer(ctx)
 	}()
 
 	s.informer.EnsureSynced(waitForSyncedDuration)
@@ -245,3 +258,38 @@ func (s *Server) Queues() *queue.SendRecvQueues {
 func (s *Server) AppManager() *application.Manager {
 	return s.appManager
 }
+
+func (s *Server) agentMode(namespace string) types.AgentMode {
+	s.clientLock.RLock()
+	defer s.clientLock.RUnlock()
+	if mode, ok := s.namespaceMap[namespace]; ok {
+		return mode
+	}
+	return types.AgentModeNone
+}
+
+func (s *Server) setAgentMode(namespace string, mode types.AgentMode) {
+	s.clientLock.Lock()
+	defer s.clientLock.Unlock()
+	s.namespaceMap[namespace] = mode
+}
+
+// func (s *Server) namespaceFromClient(clientID string) (string, error) {
+// 	s.clientLock.RLock()
+// 	defer s.clientLock.RUnlock()
+// 	ns, ok := s.clientMap[clientID]
+// 	if !ok {
+// 		return "", fmt.Errorf("no mapping for client ID %s", clientID)
+// 	}
+// 	return ns, nil
+// }
+
+// func (s *Server) clientFromNamespace(namespace string) (string, error) {
+// 	s.clientLock.RLock()
+// 	defer s.clientLock.RUnlock()
+// 	client, ok := s.namespaceMap[namespace]
+// 	if !ok {
+// 		return "", fmt.Errorf("no mapping for namespace %s", namespace)
+// 	}
+// 	return client, nil
+// }

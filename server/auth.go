@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2"
 	"github.com/jannfis/argocd-agent/pkg/types"
+	"github.com/jannfis/argocd-agent/server/apis/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -35,20 +37,34 @@ func (s *Server) authenticate(ctx context.Context) (context.Context, error) {
 		return nil, status.Error(codes.Unauthenticated, "invalid authentication data")
 	}
 
-	agentName, err := claims.GetSubject()
+	subject, err := claims.GetSubject()
 	if err != nil {
 		logCtx.Warnf("Could not get subject from token: %v", err)
 		return nil, status.Error(codes.Unauthenticated, "invalid authentication data")
 	}
 
+	var agentInfo auth.AuthSubject
+	err = json.Unmarshal([]byte(subject), &agentInfo)
+	if err != nil {
+		logCtx.Warnf("Could not unmarshal subject from token: %v", err)
+		return nil, status.Error(codes.Unauthenticated, "invalid authentication data")
+	}
+
 	// claims at this point is validated and we can propagate values to the
 	// context.
-	authCtx := context.WithValue(ctx, types.ContextAgentIdentifier, agentName)
-	if !s.queues.HasQueuePair(agentName) {
-		logCtx.Tracef("Creating a new queue pair for client %s", agentName)
-		s.queues.Create(agentName)
+	authCtx := context.WithValue(ctx, types.ContextAgentIdentifier, agentInfo.ClientID)
+	if !s.queues.HasQueuePair(agentInfo.ClientID) {
+		logCtx.Tracef("Creating a new queue pair for client %s", agentInfo.ClientID)
+		s.queues.Create(agentInfo.ClientID)
+	} else {
+		logCtx.Tracef("Reusing existing queue pair for client %s", agentInfo.ClientID)
 	}
-	logCtx.WithField("client", agentName).Tracef("Client passed authentication")
+	mode := types.AgentModeFromString(agentInfo.Mode)
+	if mode == types.AgentModeNone {
+		return nil, status.Error(codes.Unauthenticated, "invalid operation mode")
+	}
+	s.setAgentMode(agentInfo.ClientID, mode)
+	logCtx.WithField("client", agentInfo.ClientID).Tracef("Client passed authentication")
 	return authCtx, nil
 }
 

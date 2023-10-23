@@ -11,10 +11,22 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/jannfis/argocd-agent/internal/event"
+	"github.com/jannfis/argocd-agent/pkg/client"
 	fakekube "github.com/jannfis/argocd-agent/test/fake/kube"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func newAgent(t *testing.T) *Agent {
+	t.Helper()
+	fakec := fakekube.NewFakeClientsetWithResources()
+	appc := fakeappclient.NewSimpleClientset()
+	remote, err := client.NewRemote("127.0.0.1", 8080)
+	require.NoError(t, err)
+	agent, err := NewAgent(context.TODO(), fakec, appc, "agent", WithRemote(remote))
+	require.NoError(t, err)
+	return agent
+}
 
 func Test_NewAgent(t *testing.T) {
 	fakec := fakekube.NewFakeClientsetWithResources()
@@ -25,12 +37,9 @@ func Test_NewAgent(t *testing.T) {
 }
 
 func Test_AgentNewAppFromInformer(t *testing.T) {
-	fakec := fakekube.NewFakeClientsetWithResources()
-	appc := fakeappclient.NewSimpleClientset()
-	agent, err := NewAgent(context.TODO(), fakec, appc, "agent")
+	agent := newAgent(t)
 	require.NotNil(t, agent)
-	require.NoError(t, err)
-	err = agent.Start(context.Background())
+	err := agent.Start(context.Background())
 	require.NoError(t, err)
 
 	t.Run("Add application event when agent is not connected", func(t *testing.T) {
@@ -43,7 +52,7 @@ func Test_AgentNewAppFromInformer(t *testing.T) {
 		agent.informer.SetNewAppCallback(ncb)
 		defer agent.informer.SetNewAppCallback(ocb)
 		agent.informer.EnsureSynced(1 * time.Second)
-		_, err := appc.ArgoprojV1alpha1().Applications(agent.namespace).Create(agent.context, &v1alpha1.Application{
+		_, err := agent.appclient.ArgoprojV1alpha1().Applications(agent.namespace).Create(agent.context, &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "testapp1",
 				Namespace: agent.namespace,
@@ -66,7 +75,7 @@ func Test_AgentNewAppFromInformer(t *testing.T) {
 		defer agent.informer.SetNewAppCallback(ocb)
 		agent.connected.Store(true)
 		agent.informer.EnsureSynced(1 * time.Second)
-		_, err := appc.ArgoprojV1alpha1().Applications(agent.namespace).Create(agent.context, &v1alpha1.Application{
+		_, err := agent.appclient.ArgoprojV1alpha1().Applications(agent.namespace).Create(agent.context, &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "testapp2",
 				Namespace: agent.namespace,

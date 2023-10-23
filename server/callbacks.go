@@ -3,33 +3,50 @@ package server
 import (
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/jannfis/argocd-agent/internal/event"
+	"github.com/jannfis/argocd-agent/pkg/types"
+	"github.com/sirupsen/logrus"
 )
 
-// newAppCallback is a callback for the new app event
-func (s *Server) newAppCallback(app *v1alpha1.Application) {
-	logCtx := log().WithField("component", "NewAppCallback")
-	if !s.queues.HasQueuePair(app.Namespace) {
-		logCtx.Tracef("no agent connected to namespace %s, discarding", app.Namespace)
+// newAppCallback is executed when a new application event was emitted from
+// the informer and needs to be sent out to an agent. If the receiving agent
+// is in autonomous mode, this event will be discarded.
+func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
+	logCtx := log().WithFields(logrus.Fields{
+		"component": "NewAppCallback",
+		"namespace": outbound.Namespace,
+	})
+	mode := s.agentMode(outbound.Namespace)
+	if mode != types.AgentModeManaged {
+		logCtx.Tracef("Discarding NewApp event for unmanaged agent")
 		return
 	}
-	q := s.queues.SendQ(app.Namespace)
+	if !s.queues.HasQueuePair(outbound.Namespace) {
+		logCtx.Tracef("no agent connected to namespace %s, discarding", outbound.Namespace)
+		return
+	}
+	q := s.queues.SendQ(outbound.Namespace)
 	if q == nil {
-		logCtx.Errorf("Help! queue pair for namespace %s disappeared!", app.Namespace)
+		logCtx.Errorf("Help! queue pair for namespace %s disappeared!", outbound.Namespace)
 		return
 	}
 	ev := event.Event{
 		Type:        event.EventTypeAddApp,
-		Application: app,
+		Application: outbound,
 	}
 	q.Add(ev)
-	logCtx.Tracef("Added app %s to send queue, total length now %d", app.QualifiedName(), q.Len())
+	logCtx.Tracef("Added app %s to send queue, total length now %d", outbound.QualifiedName(), q.Len())
 }
 
 func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Application) {
-	logCtx := log().WithField("component", "UpdateAppCallback")
+	s.watchLock.Lock()
+	defer s.watchLock.Unlock()
+	logCtx := log().WithFields(logrus.Fields{
+		"component":   "UpdateAppCallback",
+		"application": old.Name,
+		"queue":       old.Namespace,
+	})
 	if s.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
-		logCtx.Debugf("Ignoring this change for resource version %s", new.ResourceVersion)
-		s.appManager.UnignoreChange(new.QualifiedName(), new.ResourceVersion)
+		logCtx.Debugf("I have seen this version %s already", new.ResourceVersion)
 		return
 	}
 	if !s.queues.HasQueuePair(old.Namespace) {
@@ -46,7 +63,7 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		Application: new,
 	}
 	q.Add(ev)
-	logCtx.Tracef("Added app %s to send queue, total length now %d", old.QualifiedName(), q.Len())
+	logCtx.Tracef("Added app to send queue, total length now %d", q.Len())
 }
 
 func (s *Server) deleteAppCallback(app *v1alpha1.Application) {

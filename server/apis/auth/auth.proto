@@ -10,6 +10,8 @@ message AuthRequest {
     string method = 1;
     // Credentials specifies the credentials to use for authentication in a key/value fashion.
     map<string,string> credentials = 2;
+    // Agent's mode of operation, usually either managed or autonomous
+    string mode = 3;
 }
 
 message AuthResponse {

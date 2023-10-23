@@ -30,49 +30,16 @@ const defaultResyncPeriod = 1 * time.Minute
 // the events.
 type AppInformer struct {
 	appClient appclientset.Interface
+	options   *AppInformerOptions
 
-	options *AppInformerOptions
-
-	Informer cache.SharedIndexInformer
-	Lister   applisters.ApplicationLister
+	AppInformer cache.SharedIndexInformer
+	AppLister   applisters.ApplicationLister
 
 	lock sync.RWMutex
 
 	// synced indicates whether the informer is synced and the watch is set up
 	synced atomic.Bool
 }
-
-// ListAppsCallback is executed when the informer builds its cache. It receives
-// all apps matching the configured label selector and must returned a list of
-// apps to keep in the cache.
-//
-// Callbacks are executed after the AppInformer validated that the application
-// is good for processing.
-type ListAppsCallback func(apps []v1alpha1.Application) []v1alpha1.Application
-
-// NewAppCallback is executed when a new app is determined by the underlying
-// watcher.
-//
-// Callbacks are executed after the AppInformer validated that the application
-// is allowed for processing.
-type NewAppCallback func(app *v1alpha1.Application)
-
-// UpdateAppCallback is executed when a change event for an app is determined
-// by the underlying watcher.
-//
-// Callbacks are executed after the AppInformer validated that the application
-// is allowed for processing.
-type UpdateAppCallback func(old *v1alpha1.Application, new *v1alpha1.Application)
-
-// DeleteAppCallback is executed when an app delete event is determined by the
-// underlying watcher.
-//
-// Callbacks are executed after the AppInformer validated that the application
-// is allowed for processing.
-type DeleteAppCallback func(app *v1alpha1.Application)
-
-// ErrorCallback is executed when the watcher events encounter an error
-type ErrorCallback func(err error, fmt string, args ...string)
 
 // NewAppInformer returns a new application informer for a given namespace
 func NewAppInformer(ctx context.Context, client appclientset.Interface, namespace string, opts ...AppInformerOption) *AppInformer {
@@ -93,7 +60,7 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 
 	i := &AppInformer{options: o, appClient: client}
 
-	i.Informer = cache.NewSharedIndexInformer(
+	i.AppInformer = cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
 				logCtx := log().WithField("component", "ListWatch")
@@ -147,7 +114,7 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 			},
 		},
 	)
-	i.Informer.AddEventHandler(
+	i.AppInformer.AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				app, ok := obj.(*v1alpha1.Application)
@@ -157,8 +124,11 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 					// }
 					return
 				}
-				logCtx := log().WithFields(logrus.Fields{"component": "AddFunc", "application": app.QualifiedName()}) //WithField("component", "AddFunc").WithF
-				logCtx.Tracef("New application event")
+				logCtx := log().WithFields(logrus.Fields{
+					"component":   "AddFunc",
+					"application": app.QualifiedName(),
+				})
+				logCtx.Trace("New application event")
 				if !i.shouldProcessApp(app) {
 					return
 				}
@@ -171,16 +141,16 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 				}
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				logCtx := log().WithField("component", "UpdateFunc")
-				logCtx.Tracef("Application update event")
-				newApp, newOk := newObj.(*v1alpha1.Application)
 				oldApp, oldOk := oldObj.(*v1alpha1.Application)
+				newApp, newOk := newObj.(*v1alpha1.Application)
 				if !newOk || !oldOk {
 					// if i.options.errorCb != nil {
 					// 	i.options.errorCb(nil, "invalid resource received by update event")
 					// }
 					return
 				}
+				logCtx := log().WithFields(logrus.Fields{}) //("component", "UpdateFunc")
+				logCtx.Tracef("Application update event")
 				logCtx = logCtx.WithField("application", newApp.Name)
 
 				// Namespace of new and old app must match. Theoretically, they
@@ -232,14 +202,14 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 			},
 		},
 	)
-	i.Lister = applisters.NewApplicationLister(i.Informer.GetIndexer())
-	i.Informer.SetWatchErrorHandler(cache.DefaultWatchErrorHandler)
+	i.AppLister = applisters.NewApplicationLister(i.AppInformer.GetIndexer())
+	i.AppInformer.SetWatchErrorHandler(cache.DefaultWatchErrorHandler)
 	return i
 }
 
 func (i *AppInformer) Start(stopch <-chan struct{}) {
 	log().Infof("Starting app informer (namespaces: %s)", strings.Join(append([]string{i.options.namespace}, i.options.namespaces...), ","))
-	i.Informer.Run(stopch)
+	i.AppInformer.Run(stopch)
 	log().Infof("App informer has shutdown")
 }
 
@@ -247,48 +217,6 @@ func (i *AppInformer) Start(stopch <-chan struct{}) {
 func (i *AppInformer) shouldProcessApp(app *v1alpha1.Application) bool {
 	return glob.MatchStringInList(append([]string{i.options.namespace}, i.options.namespaces...), app.Namespace, false) &&
 		i.options.filters.Admit(app)
-}
-
-// NewAppCallback returns the new application callback of the AppInformer
-func (i *AppInformer) NewAppCallback() NewAppCallback {
-	i.lock.RLock()
-	defer i.lock.RUnlock()
-	return i.options.newCb
-}
-
-// SetNewAppCallback sets the new application callback for the AppInformer
-func (i *AppInformer) SetNewAppCallback(cb NewAppCallback) {
-	i.lock.Lock()
-	defer i.lock.Unlock()
-	i.options.newCb = cb
-}
-
-// UpdateAppCallback returns the update application callback of the AppInformer
-func (i *AppInformer) UpdateAppCallback() UpdateAppCallback {
-	i.lock.RLock()
-	defer i.lock.RUnlock()
-	return i.options.updateCb
-}
-
-// SetUpdateAppCallback sets the update application callback for the AppInformer
-func (i *AppInformer) SetUpdateAppCallback(cb UpdateAppCallback) {
-	i.lock.Lock()
-	defer i.lock.Unlock()
-	i.options.updateCb = cb
-}
-
-// DeleteAppCallback returns the delete application callback of the AppInformer
-func (i *AppInformer) DeleteAppCallback() DeleteAppCallback {
-	i.lock.RLock()
-	defer i.lock.RUnlock()
-	return i.options.deleteCb
-}
-
-// SetDeleteAppCallback sets the delete application callback for the AppInformer
-func (i *AppInformer) SetDeleteAppCallback(cb DeleteAppCallback) {
-	i.lock.Lock()
-	defer i.lock.Unlock()
-	i.options.deleteCb = cb
 }
 
 // EnsureSynced waits until either the AppInformer has fully synced or the

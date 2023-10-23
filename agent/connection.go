@@ -62,7 +62,7 @@ func (a *Agent) handleStreamEvents() error {
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
-			logCtx.Infof("Received a new event from stream: %v", ev)
+			logCtx.Debugf("Received a new event from stream")
 			switch event.EventType(ev.Event) {
 			case event.EventTypeAddApp:
 				err = a.createApplication(ev.Application)
@@ -80,7 +80,7 @@ func (a *Agent) handleStreamEvents() error {
 					logCtx.Errorf("Error deleting application: %v", err)
 				}
 			default:
-				logCtx.Infof("Unknown event received")
+				logCtx.Warnf("Received an unknown event: %d. Protocol mismatch?", ev.Event)
 			}
 		}
 	}()

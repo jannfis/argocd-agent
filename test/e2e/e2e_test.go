@@ -208,7 +208,7 @@ func Test_EndToEnd_Push(t *testing.T) {
 	assert.Equal(t, 0, q.RecvQ("default").Len())
 
 	// All applications should have been created by now on the server
-	apps, err := s.AppManager().Backend.List(context.Background(), backend.ApplicationSelector{})
+	apps, err := s.AppManager().Application.List(context.Background(), backend.ApplicationSelector{})
 	assert.NoError(t, err)
 	assert.Len(t, apps, 10)
 }

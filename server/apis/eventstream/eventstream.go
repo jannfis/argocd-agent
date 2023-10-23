@@ -81,12 +81,13 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	}
 
 	logCtx = logCtx.WithField("client", agentName)
-	logCtx.Debug("A new client connected to the event stream")
+
+	logCtx.Debug("New client connection")
 
 	// We receive events in a dedicated go routine
 	go func() {
 		logCtx := logCtx.WithField("direction", "recv")
-		logCtx.Trace("Starting new go routine in receiving direction")
+		logCtx.Trace("Starting event receiver routine")
 		for {
 			logCtx.Tracef("Waiting to receive from channel")
 			u, err := subs.Recv()
@@ -123,8 +124,11 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	}()
 	// We send events in a dedicated go routine
 	go func() {
-		logCtx := logCtx.WithField("direction", "send")
-		logCtx.Tracef("Starting go routine in sending direction")
+		logCtx := logCtx.WithFields(logrus.Fields{
+			"direction": "send",
+			"queue":     agentName,
+		})
+		logCtx.Tracef("Starting event sender routine")
 		for {
 			select {
 			case <-ctx.Done():
@@ -138,7 +142,7 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 				}
 				// Get() is blocking until there is at least one item in the
 				// queue.
-				logCtx.Tracef("Grabbing item from queue")
+				logCtx.Tracef("Waiting to grab an item from the queue")
 				item, shutdown := q.Get()
 				if shutdown {
 					logCtx.Tracef("Queue shutdown in progress")

@@ -109,9 +109,49 @@ func (_m *Application) List(ctx context.Context, selector backend.ApplicationSel
 	return r0, r1
 }
 
+// Patch provides a mock function with given fields: ctx, name, namespace, patch
+func (_m *Application) Patch(ctx context.Context, name string, namespace string, patch []byte) (*v1alpha1.Application, error) {
+	ret := _m.Called(ctx, name, namespace, patch)
+
+	var r0 *v1alpha1.Application
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, []byte) (*v1alpha1.Application, error)); ok {
+		return rf(ctx, name, namespace, patch)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, []byte) *v1alpha1.Application); ok {
+		r0 = rf(ctx, name, namespace, patch)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1alpha1.Application)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, []byte) error); ok {
+		r1 = rf(ctx, name, namespace, patch)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // StartInformer provides a mock function with given fields: ctx
 func (_m *Application) StartInformer(ctx context.Context) {
 	_m.Called(ctx)
+}
+
+// SupportsPatch provides a mock function with given fields:
+func (_m *Application) SupportsPatch() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
 }
 
 // Update provides a mock function with given fields: ctx, app

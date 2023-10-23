@@ -17,6 +17,7 @@ func (a *Agent) listAppCallback(apps []v1alpha1.Application) []v1alpha1.Applicat
 	a.appManager.ClearManaged()
 	for _, app := range apps {
 		a.appManager.Manage(app.QualifiedName())
+		a.appManager.IgnoreChange(app.QualifiedName(), app.ResourceVersion)
 	}
 	return apps
 }
@@ -68,7 +69,6 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 	defer a.watchLock.Unlock()
 	if a.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
 		logCtx.Debugf("Ignoring this change for resource version %s", new.ResourceVersion)
-		a.appManager.UnignoreChange(new.QualifiedName(), new.ResourceVersion)
 		return
 	}
 	if !reflect.DeepEqual(old.ObjectMeta.Annotations, new.ObjectMeta.Annotations) {
@@ -83,11 +83,11 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 	}
 
 	if !reflect.DeepEqual(old.Status, new.Status) {
-		logCtx.Debugf("Status differ")
+		logCtx.Debugf("Status differs")
 	}
 
 	if !reflect.DeepEqual(old.Operation, new.Operation) {
-		logCtx.Debugf("Operation differ")
+		logCtx.Debugf("Operation differs")
 	}
 
 	// If the agent is not connected, we ignore this event. It just makes no

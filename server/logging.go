@@ -36,14 +36,14 @@ func InterceptorLogger(l logrus.FieldLogger) logging.Logger {
 
 func unaryRequestLogger() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-		log().WithField("method", info.FullMethod).Info("Start serving")
+		log().WithField("method", info.FullMethod).Debug("Processing unary gRPC request")
 		return handler(ctx, req)
 	}
 }
 
 func streamRequestLogger() grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		log().WithField("method", info.FullMethod).Info("Start serving")
+		log().WithField("method", info.FullMethod).Debug("Processing streaming gRPC request")
 		return handler(srv, ss)
 	}
 }

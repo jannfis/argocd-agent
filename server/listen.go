@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
-	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/wait"
 
@@ -116,9 +114,9 @@ func (s *Server) serveGRPC(ctx context.Context, errch chan error) error {
 	s.grpcServer = grpc.NewServer(
 		grpc.ChainStreamInterceptor(
 			streamRequestLogger(),
-			logging.StreamServerInterceptor(InterceptorLogger(logrus.New()),
-				logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
-			),
+			// logging.StreamServerInterceptor(InterceptorLogger(logrus.New()),
+			// 	logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
+			// ),
 			s.streamAuthInterceptor,
 			// grpc_auth.StreamServerInterceptor(func(ctx context.Context) (context.Context, error) {
 			// 	return s.authenticate(ctx)
@@ -126,9 +124,9 @@ func (s *Server) serveGRPC(ctx context.Context, errch chan error) error {
 		),
 		grpc.ChainUnaryInterceptor(
 			unaryRequestLogger(),
-			logging.UnaryServerInterceptor(InterceptorLogger(logrus.New()),
-				logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
-			),
+			// logging.UnaryServerInterceptor(InterceptorLogger(logrus.New()),
+			// 	logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
+			// ),
 			s.unaryAuthInterceptor,
 		),
 	)
