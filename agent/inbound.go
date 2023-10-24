@@ -69,7 +69,7 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) error {
 	var err error
 	if a.mode == types.AgentModeManaged {
 		logCtx.Tracef("Calling update spec for this event")
-		_, err = a.appManager.UpdateManaged(a.context, incoming)
+		_, err = a.appManager.UpdateManagedApp(a.context, incoming)
 	} else if a.mode == types.AgentModeAutonomous {
 		logCtx.Tracef("Calling update operation for this event")
 		_, err = a.appManager.UpdateOperation(a.context, incoming)

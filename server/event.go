@@ -7,6 +7,8 @@ import (
 
 	"github.com/jannfis/argocd-agent/internal/event"
 	"github.com/jannfis/argocd-agent/internal/namelock"
+	"github.com/jannfis/argocd-agent/pkg/types"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 	"k8s.io/client-go/util/workqueue"
 )
@@ -15,26 +17,57 @@ import (
 // events received by agents. It will trigger updates of resources in the
 // server's backend.
 func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workqueue.RateLimitingInterface) error {
-	logCtx := log().WithField("module", "QueueProcessor").WithField("client", agentName)
 	i, _ := q.Get()
 	ev, ok := i.(*event.Event)
 	if !ok {
 		return fmt.Errorf("invalid data in queue: have:%T want:%T", i, ev)
 	}
-	logCtx.Debugf("Processing event: %s %s", ev.Type.String(), ev.Application.QualifiedName())
+
+	agentMode := s.agentMode(agentName)
+	incoming := ev.Application
+
+	logCtx := log().WithFields(logrus.Fields{
+		"module":   "QueueProcessor",
+		"client":   agentName,
+		"mode":     agentMode.String(),
+		"event":    ev.Type.String(),
+		"incoming": incoming.QualifiedName(),
+	})
+
+	logCtx.Debugf("Processing event")
 	switch ev.Type {
-	case event.EventTypeAddApp:
-		_, err := s.appManager.Create(ctx, ev.Application)
-		if err != nil {
-			return fmt.Errorf("could not create application %s: %w", ev.Application.QualifiedName(), err)
+	case event.EventAppAdded:
+		if agentMode == types.AgentModeAutonomous {
+			_, err := s.appManager.Create(ctx, ev.Application)
+			if err != nil {
+				return fmt.Errorf("could not create application %s: %w", ev.Application.QualifiedName(), err)
+			}
+		} else {
+			logCtx.Debugf("Discarding event, because agent is not in autonomous mode")
+			return nil
 		}
-	case event.EventTypeUpdateAppStatus:
-		incoming := ev.Application
-		_, err := s.appManager.UpdateAutonomous(ctx, incoming)
+	case event.EvenAppStatusUpdated:
+		var err error
+		if agentMode == types.AgentModeAutonomous {
+			_, err = s.appManager.UpdateAutonomousApp(ctx, incoming)
+		} else {
+			err = fmt.Errorf("event type not allowed when mode is not autonomous")
+		}
 		if err != nil {
 			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
 		}
-		logCtx.Infof("Updated app %s", incoming.QualifiedName())
+		logCtx.Infof("Updated application status %s", incoming.QualifiedName())
+	case event.EvenAppSpecUpdated:
+		var err error
+		if agentMode == types.AgentModeManaged {
+			_, err = s.appManager.UpdateStatus(ctx, incoming)
+		} else {
+			err = fmt.Errorf("event type not allowed when mode is not managed")
+		}
+		if err != nil {
+			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
+		}
+		logCtx.Infof("Updated application spec %s", incoming.QualifiedName())
 	default:
 		return fmt.Errorf("unable to process event of type %s", ev.Type.String())
 	}

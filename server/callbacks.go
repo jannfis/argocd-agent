@@ -30,7 +30,7 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		return
 	}
 	ev := event.Event{
-		Type:        event.EventTypeAddApp,
+		Type:        event.EventAppAdded,
 		Application: outbound,
 	}
 	q.Add(ev)
@@ -59,7 +59,7 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		return
 	}
 	ev := event.Event{
-		Type:        event.EventTypeUpdateAppSpec,
+		Type:        event.EvenAppSpecUpdated,
 		Application: new,
 	}
 	q.Add(ev)
@@ -78,7 +78,7 @@ func (s *Server) deleteAppCallback(app *v1alpha1.Application) {
 		return
 	}
 	ev := event.Event{
-		Type:        event.EventTypeDeleteApp,
+		Type:        event.EventAppDeleted,
 		Application: app,
 	}
 	q.Add(ev)

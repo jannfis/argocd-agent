@@ -87,7 +87,7 @@ func Test_AgentNewAppFromInformer(t *testing.T) {
 		assert.Equal(t, 1, agent.queues.SendQ(defaultQueueName).Len())
 		ev, _ := agent.queues.SendQ(defaultQueueName).Get()
 		require.IsType(t, event.Event{}, ev)
-		assert.Equal(t, event.EventTypeAddApp, ev.(event.Event).Type)
+		assert.Equal(t, event.EventAppAdded, ev.(event.Event).Type)
 		assert.Equal(t, "testapp2", ev.(event.Event).Application.Name)
 	})
 
@@ -128,7 +128,7 @@ func Test_AgentUpdateAppFromInformer(t *testing.T) {
 		// assert.Equal(t, 1, agent.queues.SendQ(defaultQueueName).Len())
 		ev, _ := agent.queues.SendQ(defaultQueueName).Get()
 		require.IsType(t, event.Event{}, ev)
-		assert.Equal(t, event.EventTypeUpdateAppStatus, ev.(event.Event).Type)
+		assert.Equal(t, event.EvenAppStatusUpdated, ev.(event.Event).Type)
 		assert.Equal(t, "testapp", ev.(event.Event).Application.Name)
 	})
 

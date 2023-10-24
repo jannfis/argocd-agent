@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -13,6 +14,7 @@ import (
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/jannfis/argocd-agent/internal/backend"
 	"github.com/jannfis/argocd-agent/internal/metrics"
+	"github.com/jannfis/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
 )
@@ -44,6 +46,7 @@ type Manager struct {
 	Metrics     *metrics.ApplicationClientMetrics
 	Location    ManagerLocation
 	Mode        ManagerMode
+	Namespace   string
 	managedApps map[string]bool // Managed apps is a list of apps we manage
 	observedApp map[string]string
 	lock        sync.RWMutex
@@ -79,7 +82,7 @@ func WithMode(mode ManagerMode) ManagerOption {
 
 // NewManager initializes and returns a new Manager with the given backend and
 // options.
-func NewManager(be backend.Application, opts ...ManagerOption) *Manager {
+func NewManager(be backend.Application, namespace string, opts ...ManagerOption) *Manager {
 	m := &Manager{}
 	for _, o := range opts {
 		o(m)
@@ -87,6 +90,7 @@ func NewManager(be backend.Application, opts ...ManagerOption) *Manager {
 	m.Application = be
 	m.observedApp = make(map[string]string)
 	m.managedApps = make(map[string]bool)
+	m.Namespace = namespace
 	return m
 }
 
@@ -118,37 +122,60 @@ func (m *Manager) Create(ctx context.Context, app *v1alpha1.Application) (*v1alp
 	return created, err
 }
 
-func (m *Manager) UpdateManaged(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+// UpdateManagedApp updates the Application resource on the agent when it is in
+// managed mode.
+//
+// The app on the agent will inherit labels and annotations as well as the spec
+// and any operation field of the incoming application. A possibly existing
+// refresh annotation on the agent's app will be retained, because it will be
+// removed by the agent's application controller.
+func (m *Manager) UpdateManagedApp(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
 	logCtx := log().WithFields(logrus.Fields{
-		"component":       "UpdateSpec",
+		"component":       "UpdateManaged",
 		"application":     incoming.QualifiedName(),
 		"resourceVersion": incoming.ResourceVersion,
 	})
 
 	var updated *v1alpha1.Application
 	var err error
-	updated, err = m.update(ctx, incoming, func(existing, incoming *v1alpha1.Application) {
+
+	incoming.SetNamespace(m.Namespace)
+
+	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
 		existing.Spec = *incoming.Spec.DeepCopy()
 		existing.Operation = incoming.Operation.DeepCopy()
 		existing.Status = *incoming.Status.DeepCopy()
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
+		// We need to keep the refresh label if it is set on the existing app
+		if v, ok := existing.Annotations["argocd.argoproj.io/refresh"]; ok {
+			if incoming.Annotations == nil {
+				incoming.Annotations = make(map[string]string)
+			}
+			incoming.Annotations["argocd.argoproj.io/refresh"] = v
+		}
 		target := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
+				Annotations: incoming.Annotations,
 				Labels:      incoming.Labels,
-				Annotations: incoming.Labels,
 			},
-			Spec: incoming.Spec,
+			Spec:      incoming.Spec,
+			Operation: incoming.Operation,
 		}
 		source := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
-				Labels:      existing.Labels,
 				Annotations: existing.Annotations,
+				Labels:      existing.Labels,
 			},
-			Spec: existing.Spec,
+			Spec:      existing.Spec,
+			Operation: existing.Operation,
 		}
-		return jsondiff.Compare(source, target)
+		patch, err := jsondiff.Compare(source, target)
+		if err != nil {
+			return nil, err
+		}
+		return patch, err
 	})
 	if err == nil {
 		if updated.Generation == 1 {
@@ -168,7 +195,7 @@ func (m *Manager) UpdateManaged(ctx context.Context, incoming *v1alpha1.Applicat
 	return updated, err
 }
 
-// UpdateAutonomous updates the Application resource on the control plane side
+// UpdateAutonomousApp updates the Application resource on the control plane side
 // when the agent is in autonomous mode. It will update changes to .spec and
 // .status fields along with syncing labels and annotations.
 //
@@ -177,16 +204,16 @@ func (m *Manager) UpdateManaged(ctx context.Context, incoming *v1alpha1.Applicat
 //
 // This method is usually only executed by the control plane for updates that
 // are received by agents in autonomous mode.
-func (m *Manager) UpdateAutonomous(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+func (m *Manager) UpdateAutonomousApp(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
 	logCtx := log().WithFields(logrus.Fields{
-		"component":       "UpdateStatus",
+		"component":       "UpdateAutonomous",
 		"application":     incoming.QualifiedName(),
 		"resourceVersion": incoming.ResourceVersion,
 	})
 
 	var updated *v1alpha1.Application
 	var err error
-	updated, err = m.update(ctx, incoming, func(existing, incoming *v1alpha1.Application) {
+	updated, err = m.update(ctx, true, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
 		existing.Spec = incoming.Spec
@@ -216,8 +243,81 @@ func (m *Manager) UpdateAutonomous(ctx context.Context, incoming *v1alpha1.Appli
 		if existing.Operation != nil {
 			patch = append(patch, jsondiff.Operation{Type: "remove", Path: "/operation"})
 		}
-		logCtx.Tracef("Patching: %s", patch)
+
 		return patch, nil
+	})
+	if err == nil {
+		m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion)
+		logCtx.WithField("newResourceVersion", updated.ResourceVersion).Infof("Updated application status")
+		if m.Metrics != nil {
+			m.Metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
+		}
+	} else {
+		if m.Metrics != nil {
+			m.Metrics.Errors.Inc()
+		}
+	}
+	return updated, err
+}
+
+// UpdateStatus updates the application on the server for updates sent by an
+// agent that operates in managed mode.
+//
+// The app on the server will inherit the status field of the incoming app.
+// Additionally, if a refresh annotation exists on the app on the app of the
+// server, but not in the incoming app, the annotation will be removed. Any
+// operation field on the existing resource will be removed as well.
+func (m *Manager) UpdateStatus(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+	logCtx := log().WithFields(logrus.Fields{
+		"component":       "UpdateStatus",
+		"application":     incoming.QualifiedName(),
+		"resourceVersion": incoming.ResourceVersion,
+	})
+
+	var updated *v1alpha1.Application
+	var err error
+	incoming.SetNamespace(m.Namespace)
+	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
+		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
+		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
+		existing.Status = *incoming.Status.DeepCopy()
+	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
+		refresh, incomingRefresh := incoming.Annotations["argocd.argoproj.io/refresh"]
+		_, existingRefresh := existing.Annotations["argocd.argoproj.io/refresh"]
+		target := &v1alpha1.Application{
+			Status: incoming.Status,
+		}
+		source := &v1alpha1.Application{
+			Status: existing.Status,
+		}
+		patch, err := jsondiff.Compare(source, target)
+		if err != nil {
+			return nil, err
+		}
+
+		// We are not interested at keeping .operation on the control plane,
+		// because there's no controller to handle it.
+		if existing.Operation != nil {
+			patch = append(patch, jsondiff.Operation{Type: "remove", Path: "/operation"})
+		}
+
+		// If the incoming app doesn't have the refresh annotation set, we need
+		// to make sure that we remove it from the version stored on the server
+		// as well.
+		if existingRefresh && !incomingRefresh {
+			patch = append(patch, jsondiff.Operation{Type: "remove", Path: "/metadata/annotations/argocd.argoproj.io~1refresh"})
+		} else if !existingRefresh && incomingRefresh {
+			patch = append(patch, jsondiff.Operation{Type: "add", Path: "/metadata/annotations/argocd.argoproj.io~1refresh", Value: refresh})
+		}
+
+		// If there is no status yet on our application (this happens when the
+		// application was just created), we need to make sure to initialize
+		// it properly.
+		if reflect.DeepEqual(existing.Status, v1alpha1.ApplicationStatus{}) {
+			patch = append([]jsondiff.Operation{{Type: "replace", Path: "/status", Value: v1alpha1.ApplicationStatus{}}}, patch...)
+		}
+
+		return patch, err
 	})
 	if err == nil {
 		m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion)
@@ -250,7 +350,7 @@ func (m *Manager) UpdateOperation(ctx context.Context, incoming *v1alpha1.Applic
 
 	var updated *v1alpha1.Application
 	var err error
-	updated, err = m.update(ctx, incoming, func(existing, incoming *v1alpha1.Application) {
+	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
 		existing.Status = *incoming.Status.DeepCopy()
@@ -290,12 +390,12 @@ func (m *Manager) UpdateOperation(ctx context.Context, incoming *v1alpha1.Applic
 	return updated, err
 }
 
-func (m *Manager) update(ctx context.Context, incoming *v1alpha1.Application, updateFn updateTransformer, patchFn patchTransformer) (*v1alpha1.Application, error) {
+func (m *Manager) update(ctx context.Context, upsert bool, incoming *v1alpha1.Application, updateFn updateTransformer, patchFn patchTransformer) (*v1alpha1.Application, error) {
 	var updated *v1alpha1.Application
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		existing, ierr := m.Application.Get(ctx, incoming.Name, incoming.Namespace)
 		if ierr != nil {
-			if errors.IsNotFound(ierr) && m.AllowUpsert {
+			if errors.IsNotFound(ierr) && upsert {
 				updated, ierr = m.Create(ctx, incoming)
 				return ierr
 			} else {
@@ -322,6 +422,15 @@ func (m *Manager) update(ctx context.Context, incoming *v1alpha1.Application, up
 		return ierr
 	})
 	return updated, err
+}
+
+func agentFromContext(ctx context.Context) (string, error) {
+	agentName := ctx.Value(types.ContextAgentIdentifier)
+	if s, ok := agentName.(string); ok {
+		return s, nil
+	} else {
+		return "", fmt.Errorf("no agent information in context")
+	}
 }
 
 // ClearManaged clears the managed apps

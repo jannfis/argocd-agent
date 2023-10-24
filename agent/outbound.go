@@ -1,10 +1,9 @@
 package agent
 
 import (
-	"reflect"
-
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/jannfis/argocd-agent/internal/event"
+	"github.com/jannfis/argocd-agent/pkg/types"
 )
 
 // listAppCallback
@@ -53,7 +52,7 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 		return
 	}
 	ev := event.Event{
-		Type:        event.EventTypeAddApp,
+		Type:        event.EventAppAdded,
 		Application: app,
 	}
 
@@ -62,7 +61,7 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 }
 
 // addAppUpdateToQueue processes an application update event originating from
-// the AppInformer and puts it in the send queue.
+// the AppInformer and puts it in the agent's send queue.
 func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.Application) {
 	logCtx := log().WithField("event", "UpdateApp").WithField("application", old.QualifiedName())
 	a.watchLock.Lock()
@@ -70,24 +69,6 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 	if a.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
 		logCtx.Debugf("Ignoring this change for resource version %s", new.ResourceVersion)
 		return
-	}
-	if !reflect.DeepEqual(old.ObjectMeta.Annotations, new.ObjectMeta.Annotations) {
-		logCtx.Debugf("Annotations differ")
-	}
-	if !reflect.DeepEqual(old.ObjectMeta.Labels, new.ObjectMeta.Labels) {
-		logCtx.Debugf("Labels differ")
-	}
-
-	if !reflect.DeepEqual(old.Spec, new.Spec) {
-		logCtx.Debugf("Spec differs")
-	}
-
-	if !reflect.DeepEqual(old.Status, new.Status) {
-		logCtx.Debugf("Status differs")
-	}
-
-	if !reflect.DeepEqual(old.Operation, new.Operation) {
-		logCtx.Debugf("Operation differs")
 	}
 
 	// If the agent is not connected, we ignore this event. It just makes no
@@ -97,6 +78,7 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 		return
 	}
 
+	// If the app is not managed, we ignore this event.
 	if !a.appManager.IsManaged(new.QualifiedName()) {
 		logCtx.Tracef("App is not managed")
 		return
@@ -107,13 +89,27 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 		logCtx.Error("Default queue disappeared!")
 		return
 	}
+
+	// Depending on what mode the agent operates in, we sent a different type
+	// of event.
+	eventType := event.EventUnknown
+	switch a.mode {
+	case types.AgentModeAutonomous:
+		eventType = event.EvenAppStatusUpdated
+	case types.AgentModeManaged:
+		eventType = event.EvenAppSpecUpdated
+	}
+
 	ev := event.Event{
-		Type:        event.EventTypeUpdateAppStatus,
+		Type:        eventType,
 		Application: new,
 	}
 
 	q.Add(ev)
-	logCtx.WithField("sendq_len", q.Len()).WithField("sendq_name", a.remote.ClientID()).Debugf("Added app update event to send queue")
+	logCtx.
+		WithField("sendq_len", q.Len()).
+		WithField("sendq_name", a.remote.ClientID()).
+		Debugf("Added event of type %s to send queue", eventType)
 }
 
 // addAppDeletionToQueue processes an application delete event originating from
@@ -139,7 +135,7 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 		return
 	}
 	ev := event.Event{
-		Type:        event.EventTypeDeleteApp,
+		Type:        event.EventAppDeleted,
 		Application: app,
 	}
 

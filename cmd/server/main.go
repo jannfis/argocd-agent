@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/jannfis/argocd-agent/cmd/cmd"
@@ -69,6 +70,23 @@ func NewServerRunCommand() *cobra.Command {
 				}
 				authms.RegisterMethod("userpass", userauth)
 				opts = append(opts, server.WithAuthMethods(authms))
+			}
+
+			// In debug or higher log level, we start a little observer routine
+			// to get some insights.
+			if logrus.GetLevel() >= logrus.DebugLevel {
+				ticker := time.NewTicker(10 * time.Second)
+				go func() {
+					logrus.Info("Starting observer goroutine")
+					for {
+						select {
+						case <-ticker.C:
+							logrus.Infof("Number of go routines running: %d", runtime.NumGoroutine())
+						default:
+							time.Sleep(10 * time.Millisecond)
+						}
+					}
+				}()
 			}
 
 			s, err := server.NewServer(ctx, kubeConfig.ApplicationsClientset, namespace, opts...)

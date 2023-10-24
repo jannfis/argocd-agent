@@ -106,6 +106,7 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 	// The agent only supports Kubernetes as application backend
 	a.appManager = application.NewManager(
 		kube_backend.NewKubernetesBackend(a.appclient, a.informer, true),
+		a.namespace,
 	)
 
 	a.syncCh = make(chan bool, 1)

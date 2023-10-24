@@ -13,6 +13,7 @@ import (
 	"github.com/jannfis/argocd-agent/internal/auth"
 	"github.com/jannfis/argocd-agent/internal/auth/userpass"
 	"github.com/jannfis/argocd-agent/pkg/client"
+	"github.com/jannfis/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -62,6 +63,7 @@ func NewAgentRunCommand() *cobra.Command {
 			} else if rootCAPath != "" {
 				remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromFile(rootCAPath))
 			}
+			remoteOpts = append(remoteOpts, client.WithClientMode(types.AgentModeFromString(agentMode)))
 			if serverAddress != "" && serverPort > 0 && serverPort < 65536 {
 				remote, err = client.NewRemote(serverAddress, serverPort, remoteOpts...)
 				if err != nil {

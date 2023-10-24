@@ -117,7 +117,7 @@ func NewServer(ctx context.Context, appClient appclientset.Interface, namespace 
 		informerOpts...,
 	)
 
-	s.appManager = application.NewManager(kubernetes.NewKubernetesBackend(appClient, s.informer, true),
+	s.appManager = application.NewManager(kubernetes.NewKubernetesBackend(appClient, s.informer, true), s.namespace,
 		managerOpts...,
 	)
 

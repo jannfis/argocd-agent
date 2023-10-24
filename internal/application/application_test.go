@@ -28,18 +28,18 @@ var appNotFoundError = errors.NewNotFound(schema.GroupResource{Group: "argoproj.
 
 func Test_ManagerOptions(t *testing.T) {
 	t.Run("NewManager with default options", func(t *testing.T) {
-		m := NewManager(nil)
+		m := NewManager(nil, "")
 		assert.Equal(t, false, m.AllowUpsert)
 		assert.Nil(t, m.Metrics)
 	})
 
 	t.Run("NewManager with metrics", func(t *testing.T) {
-		m := NewManager(nil, WithMetrics(metrics.NewApplicationClientMetrics()))
+		m := NewManager(nil, "", WithMetrics(metrics.NewApplicationClientMetrics()))
 		assert.NotNil(t, m.Metrics)
 	})
 
 	t.Run("NewManager with upsert enabled", func(t *testing.T) {
-		m := NewManager(nil, WithAllowUpsert(true))
+		m := NewManager(nil, "", WithAllowUpsert(true))
 		assert.True(t, m.AllowUpsert)
 	})
 }
@@ -55,7 +55,7 @@ func Test_ManagerCreate(t *testing.T) {
 					return nil, nil
 				}
 			})
-		m := NewManager(mockedBackend)
+		m := NewManager(mockedBackend, "")
 		_, err := m.Create(context.TODO(), &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "existing", Namespace: "default"}})
 		assert.ErrorIs(t, err, appExistsError)
 	})
@@ -68,7 +68,7 @@ func Test_ManagerCreate(t *testing.T) {
 			},
 		}
 		mockedBackend := appmock.NewApplication(t)
-		m := NewManager(mockedBackend)
+		m := NewManager(mockedBackend, "")
 		mockedBackend.On("Create", mock.Anything, mock.Anything).Return(app, nil)
 		rapp, err := m.Create(context.TODO(), app)
 		assert.NoError(t, err)
@@ -84,7 +84,180 @@ func prettyPrint(app *v1alpha1.Application) {
 	fmt.Printf("%s", b)
 }
 
-func Test_ManagerUpdateStatus_Fake(t *testing.T) {
+func Test_ManagerUpdateManaged(t *testing.T) {
+	t.Run("Update spec", func(t *testing.T) {
+		incoming := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "cluster-1",
+				Labels: map[string]string{
+					"foo": "bar",
+				},
+				Annotations: map[string]string{
+					"bar": "foo",
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           "kustomize-guestbook",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+			Status: v1alpha1.ApplicationStatus{
+				Sync: v1alpha1.SyncStatus{
+					Status: v1alpha1.SyncStatusCodeOutOfSync,
+				},
+			},
+			Operation: &v1alpha1.Operation{
+				InitiatedBy: v1alpha1.OperationInitiator{Username: "admin"},
+			},
+		}
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"bar":  "foo",
+					"some": "other",
+				},
+				Annotations: map[string]string{
+					"bar":                        "bar",
+					"argocd.argoproj.io/refresh": "normal",
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+			Status: v1alpha1.ApplicationStatus{
+				Sync: v1alpha1.SyncStatus{
+					Status: v1alpha1.SyncStatusCodeSynced,
+				},
+			},
+			Operation: &v1alpha1.Operation{
+				InitiatedBy: v1alpha1.OperationInitiator{Username: "hello"},
+			},
+		}
+
+		// We are on the agent
+		appC := fakeappclient.NewSimpleClientset(existing)
+		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
+		be := kubernetes.NewKubernetesBackend(appC, informer, true)
+		mgr := NewManager(be, "argocd")
+
+		updated, err := mgr.UpdateManagedApp(context.Background(), incoming)
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+
+		// Application must have agent's namespace
+		require.Equal(t, updated.Namespace, "argocd")
+		// Refresh annotation should only be overwritten by the controller, not
+		// by the incoming app
+		require.Contains(t, updated.Annotations, "argocd.argoproj.io/refresh")
+		// Labels and annotations must be in sync with incoming
+		require.Equal(t, incoming.Labels, updated.Labels)
+		// Non-refresh annotations must be in sync with incoming
+		require.Equal(t, incoming.Annotations["bar"], updated.Annotations["bar"])
+		// Refresh annotation must not be removed
+		require.Contains(t, updated.Annotations, "argocd.argoproj.io/refresh")
+		// Status must not have been touched
+		require.Equal(t, existing.Status, updated.Status)
+		// Spec must be in sync with incoming
+		require.Equal(t, incoming.Spec, updated.Spec)
+	})
+}
+
+func Test_ManagerUpdateStatus(t *testing.T) {
+	t.Run("Update spec", func(t *testing.T) {
+		incoming := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "cluster-1",
+				Labels: map[string]string{
+					"foo": "bar",
+				},
+				Annotations: map[string]string{
+					"bar": "foo",
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           "kustomize-guestbook",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+			Status: v1alpha1.ApplicationStatus{
+				Sync: v1alpha1.SyncStatus{
+					Status: v1alpha1.SyncStatusCodeOutOfSync,
+				},
+			},
+		}
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"bar":  "foo",
+					"some": "other",
+				},
+				Annotations: map[string]string{
+					"bar":                        "foo",
+					"argocd.argoproj.io/refresh": "normal",
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+			Operation: &v1alpha1.Operation{
+				InitiatedBy: v1alpha1.OperationInitiator{Username: "hello"},
+			},
+		}
+
+		appC := fakeappclient.NewSimpleClientset(existing)
+		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
+		be := kubernetes.NewKubernetesBackend(appC, informer, true)
+		mgr := NewManager(be, "argocd")
+		updated, err := mgr.UpdateStatus(context.Background(), incoming)
+		require.NoError(t, err)
+		b, err := json.MarshalIndent(updated, "", " ")
+		fmt.Printf("%s\n", b)
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		require.NotContains(t, updated.Annotations, "argocd.argoproj.io/refresh")
+		require.NotContains(t, updated.Labels, "foo")
+		require.Contains(t, updated.Labels, "bar")
+		require.Contains(t, updated.Labels, "some")
+		require.Equal(t, updated.Spec.Source.Path, ".")
+		require.Nil(t, updated.Operation)
+	})
+}
+
+func Test_ManagerUpdateAutonomous(t *testing.T) {
 	t.Run("Update status", func(t *testing.T) {
 		incoming := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
@@ -112,7 +285,7 @@ func Test_ManagerUpdateStatus_Fake(t *testing.T) {
 		existing := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "foobar",
-				Namespace: "argocd",
+				Namespace: "cluster-1",
 				Labels: map[string]string{
 					"foo": "bar",
 				},
@@ -140,8 +313,8 @@ func Test_ManagerUpdateStatus_Fake(t *testing.T) {
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
 		be := kubernetes.NewKubernetesBackend(appC, informer, true)
-		mgr := NewManager(be)
-		updated, err := mgr.UpdateAutonomous(context.TODO(), incoming)
+		mgr := NewManager(be, "argocd")
+		updated, err := mgr.UpdateAutonomousApp(context.TODO(), incoming)
 		require.NoError(t, err)
 		require.NotNil(t, updated)
 		require.NotContains(t, updated.ObjectMeta.Annotations, "argocd.argoproj.io/refresh")
@@ -149,7 +322,7 @@ func Test_ManagerUpdateStatus_Fake(t *testing.T) {
 	})
 }
 
-func Test_ManagerUpdateOperation_Fake(t *testing.T) {
+func Test_ManagerUpdateOperation(t *testing.T) {
 	t.Run("Update status", func(t *testing.T) {
 		incoming := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
@@ -205,7 +378,7 @@ func Test_ManagerUpdateOperation_Fake(t *testing.T) {
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
 		be := kubernetes.NewKubernetesBackend(appC, informer, true)
-		mgr := NewManager(be)
+		mgr := NewManager(be, "argocd")
 		updated, err := mgr.UpdateOperation(context.TODO(), incoming)
 		require.NoError(t, err)
 		require.NotNil(t, updated)
@@ -213,95 +386,9 @@ func Test_ManagerUpdateOperation_Fake(t *testing.T) {
 	})
 }
 
-func Test_ManagerUpdateStatus_Mocked(t *testing.T) {
-	app := &v1alpha1.Application{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      "existing",
-			Namespace: "default",
-		},
-	}
-	t.Run("Update existing application", func(t *testing.T) {
-		existing := &v1alpha1.Application{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "existing",
-				Namespace: "default",
-				Labels: map[string]string{
-					"foo": "bar",
-				},
-				Annotations: map[string]string{
-					"bar": "foo",
-				},
-			},
-			Spec: v1alpha1.ApplicationSpec{
-				Source: &v1alpha1.ApplicationSource{
-					RepoURL: "foo",
-				},
-			},
-			Status: v1alpha1.ApplicationStatus{
-				Sync: v1alpha1.SyncStatus{
-					Status: v1alpha1.SyncStatusCodeOutOfSync,
-				},
-			},
-		}
-		incoming := &v1alpha1.Application{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "existing",
-				Namespace: "default",
-				Labels: map[string]string{
-					"foo": "bar",
-					"bar": "foo",
-				},
-				Annotations: map[string]string{
-					"foo": "bar",
-				},
-				ResourceVersion: "3",
-			},
-			Operation: &v1alpha1.Operation{},
-			Spec: v1alpha1.ApplicationSpec{
-				Source: &v1alpha1.ApplicationSource{
-					RepoURL: "bar",
-				},
-			},
-			Status: v1alpha1.ApplicationStatus{
-				Sync: v1alpha1.SyncStatus{
-					Status: v1alpha1.SyncStatusCodeSynced,
-				},
-			},
-		}
-
-		mockedBackend := appmock.NewApplication(t)
-		m := NewManager(mockedBackend)
-		mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existing, nil)
-		mockedBackend.On("SupportsPatch").Return(true)
-		mockedBackend.On("Patch", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(incoming, nil)
-		napp, err := m.UpdateAutonomous(context.TODO(), incoming)
-		assert.NoError(t, err)
-		assert.Equal(t, napp, incoming)
-		assert.True(t, m.IsChangeIgnored(napp.QualifiedName(), napp.ResourceVersion))
-	})
-
-	t.Run("Update non-existing application", func(t *testing.T) {
-		mockedBackend := appmock.NewApplication(t)
-		m := NewManager(mockedBackend)
-		mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, appNotFoundError)
-		_, err := m.UpdateAutonomous(context.TODO(), &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "existing", Namespace: "default"}})
-		assert.ErrorIs(t, err, appNotFoundError)
-	})
-
-	t.Run("Upsert non-existing application", func(t *testing.T) {
-		mockedBackend := appmock.NewApplication(t)
-		m := NewManager(mockedBackend, WithAllowUpsert(true))
-		mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, appNotFoundError)
-		mockedBackend.On("Create", mock.Anything, mock.Anything).Return(app, nil)
-		napp, err := m.UpdateAutonomous(context.TODO(), &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "existing", Namespace: "default"}})
-		assert.NoError(t, err)
-		assert.Equal(t, app, napp)
-	})
-}
-
 func Test_ManageApp(t *testing.T) {
 	t.Run("Mark app as managed", func(t *testing.T) {
-		appm := NewManager(nil)
+		appm := NewManager(nil, "")
 		assert.False(t, appm.IsManaged("foo"))
 		err := appm.Manage("foo")
 		assert.NoError(t, err)
@@ -315,7 +402,7 @@ func Test_ManageApp(t *testing.T) {
 	})
 
 	t.Run("Mark app as unmanaged", func(t *testing.T) {
-		appm := NewManager(nil)
+		appm := NewManager(nil, "")
 		err := appm.Manage("foo")
 		assert.True(t, appm.IsManaged("foo"))
 		assert.NoError(t, err)
@@ -330,7 +417,7 @@ func Test_ManageApp(t *testing.T) {
 
 func Test_IgnoreChange(t *testing.T) {
 	t.Run("Ignore a change", func(t *testing.T) {
-		appm := NewManager(nil)
+		appm := NewManager(nil, "")
 		assert.False(t, appm.IsChangeIgnored("foo", "1"))
 		err := appm.IgnoreChange("foo", "1")
 		assert.NoError(t, err)
@@ -344,7 +431,7 @@ func Test_IgnoreChange(t *testing.T) {
 	})
 
 	t.Run("Unignore a change", func(t *testing.T) {
-		appm := NewManager(nil)
+		appm := NewManager(nil, "")
 		err := appm.UnignoreChange("foo")
 		assert.Error(t, err)
 		assert.False(t, appm.IsChangeIgnored("foo", "1"))

@@ -64,7 +64,7 @@ func (s *Server) authenticate(ctx context.Context) (context.Context, error) {
 		return nil, status.Error(codes.Unauthenticated, "invalid operation mode")
 	}
 	s.setAgentMode(agentInfo.ClientID, mode)
-	logCtx.WithField("client", agentInfo.ClientID).Tracef("Client passed authentication")
+	logCtx.WithField("client", agentInfo.ClientID).WithField("mode", agentInfo.Mode).Tracef("Client passed authentication")
 	return authCtx, nil
 }
 
