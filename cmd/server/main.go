@@ -33,7 +33,7 @@ func NewServerRunCommand() *cobra.Command {
 	var command = &cobra.Command{
 		Short: "Run the argocd-agent server component",
 		Run: func(c *cobra.Command, args []string) {
-			ctx, cancelFn := context.WithTimeout(context.Background(), 1*time.Hour)
+			ctx, cancelFn := context.WithCancel(context.Background())
 			defer cancelFn()
 
 			opts := []server.ServerOption{}
@@ -44,32 +44,37 @@ func NewServerRunCommand() *cobra.Command {
 				}
 				logrus.SetLevel(lvl)
 			}
+
 			kubeConfig, err := cmd.GetKubeConfig(ctx, namespace, kubeConfig)
 			if err != nil {
 				cmd.Fatal("Could not load Kubernetes config: %v", err)
 			}
+
 			opts = append(opts, server.WithListenerAddress(listenHost))
 			opts = append(opts, server.WithListenerPort(listenPort))
 			opts = append(opts, server.WithGRPC(true))
+
 			if !disableMetrics {
 				opts = append(opts, server.WithMetricsPort(metricsPort))
 			}
+
 			opts = append(opts, server.WithNamespaces(allowedNamespaces...))
+
 			if tlsCert != "" && tlsKey != "" {
 				opts = append(opts, server.WithTLSKeyPair(tlsCert, tlsKey))
 			} else if tlsGenerate {
 				opts = append(opts, server.WithGeneratedTLS("argocd-agent"))
 			}
 
-			authms := auth.NewMethods()
+			authMethods := auth.NewMethods()
 			userauth := userpass.NewUserPassAuthentication()
 			if userDB != "" {
 				err = userauth.LoadAuthDataFromFile(userDB)
 				if err != nil {
 					cmd.Fatal("Could not load user database: %v", err)
 				}
-				authms.RegisterMethod("userpass", userauth)
-				opts = append(opts, server.WithAuthMethods(authms))
+				authMethods.RegisterMethod("userpass", userauth)
+				opts = append(opts, server.WithAuthMethods(authMethods))
 			}
 
 			// In debug or higher log level, we start a little observer routine

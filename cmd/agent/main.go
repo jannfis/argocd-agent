@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/jannfis/argocd-agent/agent"
 	"github.com/jannfis/argocd-agent/cmd/cmd"
@@ -33,7 +32,7 @@ func NewAgentRunCommand() *cobra.Command {
 	command := &cobra.Command{
 		Short: "Run the argocd-agent agent component",
 		Run: func(c *cobra.Command, args []string) {
-			ctx, cancelFn := context.WithTimeout(context.Background(), 1*time.Hour)
+			ctx, cancelFn := context.WithCancel(context.Background())
 			defer cancelFn()
 
 			agentOpts := []agent.AgentOption{}

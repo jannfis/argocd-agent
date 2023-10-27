@@ -15,6 +15,7 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		"component": "NewAppCallback",
 		"namespace": outbound.Namespace,
 	})
+
 	mode := s.agentMode(outbound.Namespace)
 	if mode != types.AgentModeManaged {
 		logCtx.Tracef("Discarding NewApp event for unmanaged agent")
@@ -66,21 +67,26 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 	logCtx.Tracef("Added app to send queue, total length now %d", q.Len())
 }
 
-func (s *Server) deleteAppCallback(app *v1alpha1.Application) {
+func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 	logCtx := log().WithField("component", "DeleteAppCallback")
-	if !s.queues.HasQueuePair(app.Namespace) {
-		logCtx.Tracef("no agent connected to namespace %s, discarding", app.Namespace)
+	if !s.queues.HasQueuePair(outbound.Namespace) {
+		logCtx.Tracef("no agent connected to namespace %s, discarding", outbound.Namespace)
 		return
 	}
-	q := s.queues.SendQ(app.Namespace)
+	mode := s.agentMode(outbound.Namespace)
+	if mode != types.AgentModeManaged {
+		logCtx.Tracef("Discarding DeleteApp event for unmanaged agent")
+		return
+	}
+	q := s.queues.SendQ(outbound.Namespace)
 	if q == nil {
-		logCtx.Errorf("Help! queue pair for namespace %s disappeared!", app.Namespace)
+		logCtx.Errorf("Help! queue pair for namespace %s disappeared!", outbound.Namespace)
 		return
 	}
 	ev := event.Event{
 		Type:        event.EventAppDeleted,
-		Application: app,
+		Application: outbound,
 	}
+	logCtx.WithField("event", "DeleteApp").WithField("sendq_len", q.Len()+1).Tracef("Added event to send queue")
 	q.Add(ev)
-	logCtx.WithField("event", "DeletaApp").WithField("sendq_len", q.Len()).Tracef("Added event to send queue")
 }

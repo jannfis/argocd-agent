@@ -18,7 +18,7 @@ were received from a server.
 
 // createApplication creates an Application upon an event in the agent's work
 // queue.
-func (a *Agent) createApplication(incoming *v1alpha1.Application) error {
+func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
 	incoming.ObjectMeta.SetNamespace(a.namespace)
 	logCtx := log().WithFields(logrus.Fields{
 		"method": "CreateApplication",
@@ -29,7 +29,7 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) error {
 	// that are incoming.
 	if a.mode != types.AgentModeManaged {
 		logCtx.Trace("Discarding this event, because agent is not in managed mode")
-		return nil
+		return nil, fmt.Errorf("cannot create application: agent is not in managed mode")
 	}
 
 	// If we receive a new app event for an app we already manage, it usually
@@ -37,8 +37,8 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) error {
 	//
 	// TODO(jannfis): Handle this situation properly instead of throwing an error.
 	if a.appManager.IsManaged(incoming.QualifiedName()) {
-		logCtx.Infof("App is already managed")
-		return fmt.Errorf("application %s is already managed", incoming.QualifiedName())
+		logCtx.Trace("Discarding this event, because application is already managed on this agent")
+		return nil, fmt.Errorf("application %s is already managed", incoming.QualifiedName())
 	}
 
 	logCtx.Infof("Creating a new application on behalf of an incoming event")
@@ -49,34 +49,39 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) error {
 		delete(incoming.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
 	}
 
-	_, err := a.appManager.Create(a.context, incoming)
-	return err
+	created, err := a.appManager.Create(a.context, incoming)
+	return created, err
 }
 
-func (a *Agent) updateApplication(incoming *v1alpha1.Application) error {
+func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+	//
 	incoming.ObjectMeta.SetNamespace(a.namespace)
 	logCtx := log().WithFields(logrus.Fields{
-		"method": "UpdateApplication",
-		"app":    incoming.QualifiedName(),
+		"method":          "UpdateApplication",
+		"app":             incoming.QualifiedName(),
+		"resourceVersion": incoming.ResourceVersion,
 	})
-
 	if a.appManager.IsChangeIgnored(incoming.QualifiedName(), incoming.ResourceVersion) {
 		logCtx.Tracef("Discarding this event, because agent has seen this version %s already", incoming.ResourceVersion)
-		return nil
+		return nil, fmt.Errorf("the version %s has already been seen by this agent", incoming.ResourceVersion)
+	} else {
+		logCtx.Tracef("New resource version: %s", incoming.ResourceVersion)
 	}
 
 	logCtx.Infof("Updating application")
+
 	var err error
+	var napp *v1alpha1.Application
 	if a.mode == types.AgentModeManaged {
 		logCtx.Tracef("Calling update spec for this event")
-		_, err = a.appManager.UpdateManagedApp(a.context, incoming)
+		napp, err = a.appManager.UpdateManagedApp(a.context, incoming)
 	} else if a.mode == types.AgentModeAutonomous {
 		logCtx.Tracef("Calling update operation for this event")
-		_, err = a.appManager.UpdateOperation(a.context, incoming)
+		napp, err = a.appManager.UpdateOperation(a.context, incoming)
 	} else {
 		err = fmt.Errorf("unknown operation mode: %d", a.mode)
 	}
-	return err
+	return napp, err
 }
 
 func (a *Agent) deleteApplication(app *v1alpha1.Application) error {

@@ -38,7 +38,8 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	switch ev.Type {
 	case event.EventAppAdded:
 		if agentMode == types.AgentModeAutonomous {
-			_, err := s.appManager.Create(ctx, ev.Application)
+			incoming.SetNamespace(agentName)
+			_, err := s.appManager.Create(ctx, incoming)
 			if err != nil {
 				return fmt.Errorf("could not create application %s: %w", ev.Application.QualifiedName(), err)
 			}
@@ -49,7 +50,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	case event.EvenAppStatusUpdated:
 		var err error
 		if agentMode == types.AgentModeAutonomous {
-			_, err = s.appManager.UpdateAutonomousApp(ctx, incoming)
+			_, err = s.appManager.UpdateAutonomousApp(ctx, agentName, incoming)
 		} else {
 			err = fmt.Errorf("event type not allowed when mode is not autonomous")
 		}
@@ -60,7 +61,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	case event.EvenAppSpecUpdated:
 		var err error
 		if agentMode == types.AgentModeManaged {
-			_, err = s.appManager.UpdateStatus(ctx, incoming)
+			_, err = s.appManager.UpdateStatus(ctx, agentName, incoming)
 		} else {
 			err = fmt.Errorf("event type not allowed when mode is not managed")
 		}
@@ -75,6 +76,75 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	return nil
 }
 
+// eventProcessor is the main loop to process event from the receiver queue,
+// i.e. events coming from the connect agents. It will process events from
+// different agents in parallel, but it will not parallelize processing of
+// events from the same queue. These latter events need to be processed in
+// sequential order, in any case.
+func (s *Server) eventProcessor(ctx context.Context) error {
+	sem := semaphore.NewWeighted(s.options.eventProcessors)
+	queueLock := namelock.NewNameLock()
+	logCtx := log().WithField("module", "EventProcessor")
+	for {
+		for _, queueName := range s.queues.Names() {
+			select {
+			case <-ctx.Done():
+				logCtx.Infof("Shutting down event processor")
+				return nil
+			default:
+				// Though unlikely, the agent might have disconnected, and
+				// the queue will be gone. In this case, we'll just skip.
+				q := s.queues.RecvQ(queueName)
+				if q == nil {
+					logCtx.Debugf("Queue disappeared -- client probably has disconnected")
+					break
+				}
+
+				// Since q.Get() is blocking, we want to make sure something is actually
+				// in the queue before we try to grab it.
+				if q.Len() == 0 {
+					break
+				}
+
+				// We lock this specific queue, so that we won't process two
+				// items of the same queue at the same time. Queues must be
+				// processed in FIFO order, always.
+				//
+				// If it's not possible to get a lock (i.e. a lock is already
+				// being held elsewhere), we continue with the next queue.
+				if !queueLock.TryLock(queueName) {
+					break
+				}
+
+				logCtx.Trace("Acquired queue lock")
+
+				err := sem.Acquire(ctx, 1)
+				if err != nil {
+					logCtx.Tracef("Error acquiring semaphore: %v", err)
+					queueLock.Unlock(queueName)
+					break
+				}
+
+				logCtx.Trace("Acquired semaphore")
+
+				go func(agentName string, q workqueue.RateLimitingInterface) {
+					defer func() {
+						sem.Release(1)
+						queueLock.Unlock(agentName)
+					}()
+					err := s.processRecvQueue(ctx, agentName, q)
+					if err != nil {
+						logCtx.WithField("client", agentName).WithError(err).Errorf("Could not process agent recveiver queue")
+					}
+				}(queueName, q)
+			}
+		}
+		// Give the CPU a little rest when no agents are connected
+		time.Sleep(10 * time.Millisecond)
+	}
+
+}
+
 // StartEventProcessor will start the event processor, which processes items
 // from all queues as the items appear in the queues. Processing will be
 // performed in parallel, and in the background, until the context ctx is done.
@@ -82,69 +152,10 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 // If an error occurs before the processor could be started, it will be
 // returned.
 func (s *Server) StartEventProcessor(ctx context.Context) error {
+	var err error
 	go func() {
-		sem := semaphore.NewWeighted(s.options.eventProcessors)
-		queueLock := namelock.NewNameLock()
-		logCtx := log().WithField("module", "EventProcessor")
-		for {
-			for _, queueName := range s.queues.Names() {
-				select {
-				case <-ctx.Done():
-					logCtx.Infof("Shutting down event processor")
-					return
-				default:
-					// Though unlikely, the agent might have disconnected, and
-					// the queue will be gone. In this case, we'll just skip.
-					q := s.queues.RecvQ(queueName)
-					if q == nil {
-						logCtx.Debugf("Queue disappeared -- client probably has disconnected")
-						break
-					}
-
-					// Since q.Get() is blocking, we want to make sure something is actually
-					// in the queue before we try to grab it.
-					if q.Len() == 0 {
-						break
-					}
-
-					// We lock this specific queue, so that we won't process two
-					// items of the same queue at the same time. Queues must be
-					// processed in the right order.
-					//
-					// If it's not possible to get a lock (i.e. a lock is already
-					// being held elsewhere), we continue with the next queue.
-					if !queueLock.TryLock(queueName) {
-						logCtx.Tracef("Could not acquire queue lock %s", queueName)
-						break
-					}
-
-					logCtx.Trace("Acquired lock")
-
-					err := sem.Acquire(ctx, 1)
-					if err != nil {
-						logCtx.Tracef("Error acquiring semaphore: %v", err)
-						queueLock.Unlock(queueName)
-						break
-					}
-
-					logCtx.Trace("Acquired semaphore")
-
-					go func(agentName string, q workqueue.RateLimitingInterface) {
-						defer func() {
-							sem.Release(1)
-							queueLock.Unlock(agentName)
-						}()
-						err := s.processRecvQueue(ctx, agentName, q)
-						if err != nil {
-							logCtx.WithField("client", agentName).WithError(err).Errorf("Could not process agent recveiver queue")
-						}
-					}(queueName, q)
-				}
-			}
-			// Give the CPU a little rest when no agents are connected
-			time.Sleep(10 * time.Millisecond)
-		}
+		log().Infof("Starting event processor")
+		err = s.eventProcessor(ctx)
 	}()
-
-	return nil
+	return err
 }

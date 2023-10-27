@@ -24,6 +24,7 @@ const _ = grpc.SupportPackageIsVersion7
 type EventStreamClient interface {
 	Subscribe(ctx context.Context, opts ...grpc.CallOption) (EventStream_SubscribeClient, error)
 	Push(ctx context.Context, opts ...grpc.CallOption) (EventStream_PushClient, error)
+	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PongReply, error)
 }
 
 type eventStreamClient struct {
@@ -99,12 +100,22 @@ func (x *eventStreamPushClient) CloseAndRecv() (*PushSummary, error) {
 	return m, nil
 }
 
+func (c *eventStreamClient) Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PongReply, error) {
+	out := new(PongReply)
+	err := c.cc.Invoke(ctx, "/eventstreamapi.EventStream/Ping", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // EventStreamServer is the server API for EventStream service.
 // All implementations must embed UnimplementedEventStreamServer
 // for forward compatibility
 type EventStreamServer interface {
 	Subscribe(EventStream_SubscribeServer) error
 	Push(EventStream_PushServer) error
+	Ping(context.Context, *PingRequest) (*PongReply, error)
 	mustEmbedUnimplementedEventStreamServer()
 }
 
@@ -117,6 +128,9 @@ func (UnimplementedEventStreamServer) Subscribe(EventStream_SubscribeServer) err
 }
 func (UnimplementedEventStreamServer) Push(EventStream_PushServer) error {
 	return status.Errorf(codes.Unimplemented, "method Push not implemented")
+}
+func (UnimplementedEventStreamServer) Ping(context.Context, *PingRequest) (*PongReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Ping not implemented")
 }
 func (UnimplementedEventStreamServer) mustEmbedUnimplementedEventStreamServer() {}
 
@@ -183,13 +197,36 @@ func (x *eventStreamPushServer) Recv() (*Event, error) {
 	return m, nil
 }
 
+func _EventStream_Ping_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EventStreamServer).Ping(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/eventstreamapi.EventStream/Ping",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EventStreamServer).Ping(ctx, req.(*PingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // EventStream_ServiceDesc is the grpc.ServiceDesc for EventStream service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var EventStream_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "eventstreamapi.EventStream",
 	HandlerType: (*EventStreamServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Ping",
+			Handler:    _EventStream_Ping_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Subscribe",

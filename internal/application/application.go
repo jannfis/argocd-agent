@@ -204,7 +204,7 @@ func (m *Manager) UpdateManagedApp(ctx context.Context, incoming *v1alpha1.Appli
 //
 // This method is usually only executed by the control plane for updates that
 // are received by agents in autonomous mode.
-func (m *Manager) UpdateAutonomousApp(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+func (m *Manager) UpdateAutonomousApp(ctx context.Context, namespace string, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "UpdateAutonomous",
 		"application":     incoming.QualifiedName(),
@@ -213,9 +213,12 @@ func (m *Manager) UpdateAutonomousApp(ctx context.Context, incoming *v1alpha1.Ap
 
 	var updated *v1alpha1.Application
 	var err error
+	incoming.SetNamespace(namespace)
 	updated, err = m.update(ctx, true, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
+		existing.DeletionTimestamp = incoming.DeletionTimestamp
+		existing.DeletionGracePeriodSeconds = incoming.DeletionGracePeriodSeconds
 		existing.Spec = incoming.Spec
 		existing.Status = *incoming.Status.DeepCopy()
 		existing.Operation = nil
@@ -267,7 +270,7 @@ func (m *Manager) UpdateAutonomousApp(ctx context.Context, incoming *v1alpha1.Ap
 // Additionally, if a refresh annotation exists on the app on the app of the
 // server, but not in the incoming app, the annotation will be removed. Any
 // operation field on the existing resource will be removed as well.
-func (m *Manager) UpdateStatus(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+func (m *Manager) UpdateStatus(ctx context.Context, namespace string, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "UpdateStatus",
 		"application":     incoming.QualifiedName(),
@@ -276,7 +279,7 @@ func (m *Manager) UpdateStatus(ctx context.Context, incoming *v1alpha1.Applicati
 
 	var updated *v1alpha1.Application
 	var err error
-	incoming.SetNamespace(m.Namespace)
+	incoming.SetNamespace(namespace)
 	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels

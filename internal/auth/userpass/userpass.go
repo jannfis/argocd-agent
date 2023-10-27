@@ -84,7 +84,7 @@ func (a *UserPassAuthentication) UpsertUser(username, password string) {
 }
 
 // Client ID must be 32 characters, hexadecimal string
-var clientIDRe = regexp.MustCompile(`^[a-zA-Z0-9]{2,32}$`)
+var clientIDRe = regexp.MustCompile(`^[a-zA-Z0-9]{2,}$`)
 
 // We actually support all current bcrypt variants
 var clientSecretRe = regexp.MustCompile(`^\$2[abxy]\$[0-9]{2}.*`)

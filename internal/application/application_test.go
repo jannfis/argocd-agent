@@ -184,7 +184,7 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		incoming := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "foobar",
-				Namespace: "cluster-1",
+				Namespace: "argocd",
 				Labels: map[string]string{
 					"foo": "bar",
 				},
@@ -212,7 +212,7 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		existing := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "foobar",
-				Namespace: "argocd",
+				Namespace: "cluster-1",
 				Labels: map[string]string{
 					"bar":  "foo",
 					"some": "other",
@@ -242,12 +242,13 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
 		be := kubernetes.NewKubernetesBackend(appC, informer, true)
 		mgr := NewManager(be, "argocd")
-		updated, err := mgr.UpdateStatus(context.Background(), incoming)
+		updated, err := mgr.UpdateStatus(context.Background(), "cluster-1", incoming)
 		require.NoError(t, err)
 		b, err := json.MarshalIndent(updated, "", " ")
 		fmt.Printf("%s\n", b)
 		require.NoError(t, err)
 		require.NotNil(t, updated)
+		require.Equal(t, "cluster-1", updated.Namespace)
 		require.NotContains(t, updated.Annotations, "argocd.argoproj.io/refresh")
 		require.NotContains(t, updated.Labels, "foo")
 		require.Contains(t, updated.Labels, "bar")
@@ -314,9 +315,10 @@ func Test_ManagerUpdateAutonomous(t *testing.T) {
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
 		be := kubernetes.NewKubernetesBackend(appC, informer, true)
 		mgr := NewManager(be, "argocd")
-		updated, err := mgr.UpdateAutonomousApp(context.TODO(), incoming)
+		updated, err := mgr.UpdateAutonomousApp(context.TODO(), "cluster-1", incoming)
 		require.NoError(t, err)
 		require.NotNil(t, updated)
+		assert.Equal(t, "cluster-1", updated.Namespace)
 		require.NotContains(t, updated.ObjectMeta.Annotations, "argocd.argoproj.io/refresh")
 		require.Equal(t, map[string]string{"foo": "bar"}, updated.Labels)
 	})

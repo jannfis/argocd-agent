@@ -65,12 +65,12 @@ func (a *Agent) handleStreamEvents() error {
 			logCtx.Debugf("Received a new event from stream")
 			switch event.EventType(ev.Event) {
 			case event.EventAppAdded:
-				err = a.createApplication(ev.Application)
+				_, err := a.createApplication(ev.Application)
 				if err != nil {
 					logCtx.Errorf("Error creating application: %v", err)
 				}
 			case event.EvenAppSpecUpdated:
-				err = a.updateApplication(ev.Application)
+				_, err = a.updateApplication(ev.Application)
 				if err != nil {
 					logCtx.Errorf("Error updating application: %v", err)
 				}
