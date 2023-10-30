@@ -7,12 +7,14 @@ import (
 	"time"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/jannfis/argocd-agent/internal/event"
 	"github.com/jannfis/argocd-agent/internal/queue"
 	"github.com/jannfis/argocd-agent/server/apis/eventstream/mock"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_Subscribe(t *testing.T) {
@@ -28,8 +30,12 @@ func Test_Subscribe(t *testing.T) {
 			log().WithField("component", "RecvHook").Tracef("Exit")
 			return io.EOF
 		})
-		qs.SendQ("default").Add(&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "test"}})
-		qs.SendQ("default").Add(&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "bar", Namespace: "test"}})
+		qs.SendQ("default").Add(event.Event{Type: event.EventAppAdded, Application: &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "test"}},
+		})
+		qs.SendQ("default").Add(event.Event{Type: event.EventAppAdded, Application: &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{Name: "bar", Namespace: "test"}},
+		})
 		err := s.Subscribe(st)
 		assert.Nil(t, err)
 		assert.Equal(t, 0, int(st.NumRecv.Load()))
@@ -54,10 +60,10 @@ func Test_Subscribe(t *testing.T) {
 			return nil
 		})
 		err := s.Subscribe(st)
-		assert.Nil(t, err)
+		require.NoError(t, err)
+		require.False(t, qs.HasQueuePair("default"))
 		assert.Equal(t, 2, int(st.NumRecv.Load()))
 		assert.Equal(t, 0, int(st.NumSent.Load()))
-		assert.Equal(t, 2, qs.RecvQ("default").Len())
 	})
 
 	t.Run("Test connection closed by peer", func(t *testing.T) {

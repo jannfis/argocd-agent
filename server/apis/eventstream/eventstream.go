@@ -183,7 +183,7 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 
 				ev, ok := item.(event.Event)
 				if !ok {
-					logCtx.Warnf("Invalid data in sendqueue. Want: %T, have %T", event.Event{}, ev)
+					logCtx.Warnf("Invalid data in sendqueue. Want: %T, have %T", event.Event{}, item)
 					cancelFn()
 					continue
 				}
