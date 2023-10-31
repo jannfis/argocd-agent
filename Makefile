@@ -5,7 +5,7 @@ build:
 .PHONY: test
 test:
 	mkdir -p test/out
-	go test -race -coverprofile test/out/test.coverage ./...
+	./hack/test.sh
 
 .PHONY: codegen
 codegen: protogen
