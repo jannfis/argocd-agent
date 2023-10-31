@@ -8,6 +8,18 @@ import (
 	"k8s.io/client-go/util/workqueue"
 )
 
+var _ QueuePair = &SendRecvQueues{}
+
+type QueuePair interface {
+	Names() []string
+	HasQueuePair(name string) bool
+	Len() int
+	SendQ(name string) workqueue.RateLimitingInterface
+	RecvQ(name string) workqueue.RateLimitingInterface
+	Create(name string) error
+	Delete(name string, shutdown bool) error
+}
+
 type queuepair struct {
 	recvq     workqueue.RateLimitingInterface
 	sendq     workqueue.RateLimitingInterface

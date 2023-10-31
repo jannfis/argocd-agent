@@ -20,7 +20,7 @@ type Server struct {
 	eventstreamapi.UnimplementedEventStreamServer
 
 	options *ServerOptions
-	queues  *queue.SendRecvQueues
+	queues  queue.QueuePair
 }
 
 type ServerOptions struct {
@@ -36,7 +36,7 @@ func WithMaxStreamDuration(d time.Duration) ServerOption {
 }
 
 // NewServer returns a new AppStream server instance with the given options
-func NewServer(queues *queue.SendRecvQueues, opts ...ServerOption) *Server {
+func NewServer(queues queue.QueuePair, opts ...ServerOption) *Server {
 	options := &ServerOptions{}
 	for _, o := range opts {
 		o(options)
