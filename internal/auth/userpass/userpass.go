@@ -12,6 +12,8 @@ import (
 
 	"github.com/jannfis/argocd-agent/internal/auth"
 	"github.com/sirupsen/logrus"
+
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 var _ auth.Method = &UserPassAuthentication{}
@@ -120,7 +122,8 @@ func (a *UserPassAuthentication) LoadAuthDataFromFile(path string) error {
 			log().Warnf("Ignoring invalid entry: %s:%d", path, lno)
 			continue
 		}
-		if !clientIDRe.MatchString(tok[0]) {
+		if errs := validation.IsDNS1123Label(tok[0]); len(errs) > 0 {
+			// if !clientIDRe.MatchString(tok[0]) {
 			log().Warnf("Client ID isn't valid: %s:%d", path, lno)
 			continue
 		}
