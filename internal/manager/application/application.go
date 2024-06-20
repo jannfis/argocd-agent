@@ -153,6 +153,8 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 	updated, err = m.update(ctx, m.AllowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
+		existing.ObjectMeta.Finalizers = incoming.ObjectMeta.Finalizers
+		existing.DeletionTimestamp = incoming.DeletionTimestamp
 		existing.Spec = *incoming.Spec.DeepCopy()
 		existing.Operation = incoming.Operation.DeepCopy()
 		existing.Status = *incoming.Status.DeepCopy()
@@ -166,8 +168,10 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		}
 		target := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
-				Annotations: incoming.Annotations,
-				Labels:      incoming.Labels,
+				Annotations:       incoming.Annotations,
+				Labels:            incoming.Labels,
+				DeletionTimestamp: incoming.DeletionTimestamp,
+				Finalizers:        incoming.Finalizers,
 			},
 			Spec:      incoming.Spec,
 			Operation: incoming.Operation,
@@ -240,13 +244,19 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		target := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
-				Labels:      incoming.Labels,
-				Annotations: incoming.Annotations,
+				Labels:                     incoming.Labels,
+				Annotations:                incoming.Annotations,
+				DeletionTimestamp:          incoming.DeletionTimestamp,
+				DeletionGracePeriodSeconds: incoming.DeletionGracePeriodSeconds,
 			},
 			Spec:   incoming.Spec,
 			Status: incoming.Status,
 		}
 		source := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				DeletionTimestamp:          existing.DeletionTimestamp,
+				DeletionGracePeriodSeconds: existing.DeletionGracePeriodSeconds,
+			},
 			Spec:   existing.Spec,
 			Status: existing.Status,
 		}
@@ -417,6 +427,46 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 		}
 	}
 	return updated, err
+}
+
+func (m *ApplicationManager) Delete(ctx context.Context, agentName string, incoming *v1alpha1.Application) error {
+	removeFinalizer := false
+	logCtx := log().WithFields(logrus.Fields{
+		"component":       "UpdateOperation",
+		"application":     incoming.QualifiedName(),
+		"resourceVersion": incoming.ResourceVersion,
+	})
+	if m.Role.IsPrincipal() {
+		removeFinalizer = true
+	}
+	var err error
+	var updated *v1alpha1.Application
+	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
+		if removeFinalizer {
+			existing.ObjectMeta.Finalizers = nil
+		}
+	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
+		var err error
+		var patch jsondiff.Patch
+		if removeFinalizer {
+			target := &v1alpha1.Application{
+				ObjectMeta: v1.ObjectMeta{
+					Finalizers: incoming.Finalizers,
+				},
+			}
+			source := &v1alpha1.Application{
+				ObjectMeta: v1.ObjectMeta{
+					Finalizers: nil,
+				},
+			}
+			patch, err = jsondiff.Compare(source, target, jsondiff.SkipCompact())
+		}
+		return patch, err
+	})
+	if err != nil {
+		logCtx.Debugf("Removed finalizer for app %s", updated.QualifiedName())
+	}
+	return err
 }
 
 // update updates an existing Application resource on the Manager m's backend
