@@ -23,9 +23,9 @@ import (
 type updateTransformer func(existing, incoming *v1alpha1.Application)
 type patchTransformer func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error)
 
-// LastUpdatedLabel is a label put on applications which contains the time when
-// an update was last received for this Application
-const LastUpdatedLabel = "argocd-agent.argoproj.io/last-updated"
+// LastUpdatedAnnotation is a label put on applications which contains the time
+// when an update was last received for this Application
+const LastUpdatedAnnotation = "argocd-agent.argoproj.io/last-updated"
 
 // ApplicationManager manages Argo CD application resources on a given backend.
 //
@@ -93,7 +93,7 @@ func stampLastUpdated(app *v1alpha1.Application) {
 	if app.Annotations == nil {
 		app.Annotations = make(map[string]string)
 	}
-	app.Annotations[LastUpdatedLabel] = time.Now().Format(time.RFC3339)
+	app.Annotations[LastUpdatedAnnotation] = time.Now().Format(time.RFC3339)
 }
 
 // Create creates the application app using the Manager's application backend.
@@ -445,32 +445,14 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 	}
 	var err error
 	var updated *v1alpha1.Application
-	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
-		if removeFinalizer {
-			existing.ObjectMeta.Finalizers = nil
+
+	if removeFinalizer {
+		updated, err = m.removeFinalizers(ctx, incoming)
+		if err == nil {
+			logCtx.Debugf("Removed finalizer for app %s", updated.QualifiedName())
+		} else {
+			return fmt.Errorf("error removing finalizer: %w", err)
 		}
-	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
-		var err error
-		var patch jsondiff.Patch
-		if removeFinalizer {
-			target := &v1alpha1.Application{
-				ObjectMeta: v1.ObjectMeta{
-					Finalizers: nil,
-				},
-			}
-			source := &v1alpha1.Application{
-				ObjectMeta: v1.ObjectMeta{
-					Finalizers: existing.Finalizers,
-				},
-			}
-			patch, err = jsondiff.Compare(source, target, jsondiff.SkipCompact())
-		}
-		return patch, err
-	})
-	if err == nil {
-		logCtx.Debugf("Removed finalizer for app %s", updated.QualifiedName())
-	} else {
-		return fmt.Errorf("error removing finalizer: %w", err)
 	}
 
 	err = m.Application.Delete(ctx, incoming.Name, incoming.Namespace)
@@ -521,6 +503,29 @@ func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *
 			}
 		}
 		return ierr
+	})
+	return updated, err
+}
+
+// removeFinalizers will remove finalizers on an existing application
+func (m *ApplicationManager) removeFinalizers(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+	updated, err := m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
+		existing.ObjectMeta.Finalizers = nil
+	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
+		var err error
+		var patch jsondiff.Patch
+		target := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Finalizers: nil,
+			},
+		}
+		source := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Finalizers: existing.Finalizers,
+			},
+		}
+		patch, err = jsondiff.Compare(source, target, jsondiff.SkipCompact())
+		return patch, err
 	})
 	return updated, err
 }
