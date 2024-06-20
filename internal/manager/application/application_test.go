@@ -461,15 +461,15 @@ func Test_stampLastUpdated(t *testing.T) {
 			},
 		}
 		stampLastUpdated(app)
-		assert.Contains(t, app.Labels, LastUpdatedLabel)
-		assert.Len(t, app.Labels, 1)
+		assert.Contains(t, app.Annotations, LastUpdatedAnnotation)
+		assert.Len(t, app.Annotations, 1)
 	})
-	t.Run("Stamp app with existing labels", func(t *testing.T) {
+	t.Run("Stamp app with existing annotations", func(t *testing.T) {
 		app := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "foo",
 				Namespace: "bar",
-				Labels: map[string]string{
+				Annotations: map[string]string{
 					"foo": "bar",
 					"bar": "baz",
 				},
@@ -479,8 +479,8 @@ func Test_stampLastUpdated(t *testing.T) {
 			},
 		}
 		stampLastUpdated(app)
-		assert.Contains(t, app.Labels, LastUpdatedLabel)
-		assert.Len(t, app.Labels, 3)
+		assert.Contains(t, app.Annotations, LastUpdatedAnnotation)
+		assert.Len(t, app.Annotations, 3)
 	})
 }
 
