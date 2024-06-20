@@ -90,10 +90,10 @@ func NewApplicationManager(be backend.Application, namespace string, opts ...App
 
 // stampLastUpdated "stamps" an application with the last updated label
 func stampLastUpdated(app *v1alpha1.Application) {
-	if app.Labels == nil {
-		app.Labels = make(map[string]string)
+	if app.Annotations == nil {
+		app.Annotations = make(map[string]string)
 	}
-	app.Labels[LastUpdatedLabel] = time.Now().Format(time.RFC3339)
+	app.Annotations[LastUpdatedLabel] = time.Now().Format(time.RFC3339)
 }
 
 // Create creates the application app using the Manager's application backend.
@@ -384,7 +384,7 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 
 	var updated *v1alpha1.Application
 	var err error
-	if m.Role == manager.ManagerRolePrincipal {
+	if m.Role.IsPrincipal() {
 		stampLastUpdated(incoming)
 	}
 	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
@@ -429,15 +429,16 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 	return updated, err
 }
 
-func (m *ApplicationManager) Delete(ctx context.Context, agentName string, incoming *v1alpha1.Application) error {
+func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incoming *v1alpha1.Application) error {
 	removeFinalizer := false
 	logCtx := log().WithFields(logrus.Fields{
-		"component":       "UpdateOperation",
+		"component":       "DeleteOperation",
 		"application":     incoming.QualifiedName(),
 		"resourceVersion": incoming.ResourceVersion,
 	})
 	if m.Role.IsPrincipal() {
 		removeFinalizer = true
+		incoming.SetNamespace(namespace)
 	}
 	var err error
 	var updated *v1alpha1.Application
@@ -463,9 +464,14 @@ func (m *ApplicationManager) Delete(ctx context.Context, agentName string, incom
 		}
 		return patch, err
 	})
-	if err != nil {
+	if err == nil {
 		logCtx.Debugf("Removed finalizer for app %s", updated.QualifiedName())
+	} else {
+		return fmt.Errorf("error removing finalizer: %w", err)
 	}
+
+	err = m.Application.Delete(ctx, incoming.Name, incoming.Namespace)
+
 	return err
 }
 
