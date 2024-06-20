@@ -429,6 +429,9 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 	return updated, err
 }
 
+// Delete will delete an application resource. If Delete is called by the
+// principal, any existing finalizers will be removed before deletion is
+// attempted.
 func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incoming *v1alpha1.Application) error {
 	removeFinalizer := false
 	logCtx := log().WithFields(logrus.Fields{
@@ -452,12 +455,12 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 		if removeFinalizer {
 			target := &v1alpha1.Application{
 				ObjectMeta: v1.ObjectMeta{
-					Finalizers: incoming.Finalizers,
+					Finalizers: nil,
 				},
 			}
 			source := &v1alpha1.Application{
 				ObjectMeta: v1.ObjectMeta{
-					Finalizers: nil,
+					Finalizers: existing.Finalizers,
 				},
 			}
 			patch, err = jsondiff.Compare(source, target, jsondiff.SkipCompact())
