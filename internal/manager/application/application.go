@@ -447,7 +447,7 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 	var updated *v1alpha1.Application
 
 	if removeFinalizer {
-		updated, err = m.removeFinalizers(ctx, incoming)
+		updated, err = m.RemoveFinalizers(ctx, incoming)
 		if err == nil {
 			logCtx.Debugf("Removed finalizer for app %s", updated.QualifiedName())
 		} else {
@@ -507,8 +507,8 @@ func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *
 	return updated, err
 }
 
-// removeFinalizers will remove finalizers on an existing application
-func (m *ApplicationManager) removeFinalizers(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+// RemoveFinalizers will remove finalizers on an existing application
+func (m *ApplicationManager) RemoveFinalizers(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
 	updated, err := m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Finalizers = nil
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {

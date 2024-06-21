@@ -49,6 +49,14 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		"event":            "application_update",
 		"application_name": old.Name,
 	})
+	if len(new.Finalizers) > 0 && len(new.Finalizers) != len(old.Finalizers) {
+		var err error
+		new, err = s.appManager.RemoveFinalizers(s.ctx, new)
+		if err != nil {
+			logCtx.Warnf("Could not remove finalizer")
+		}
+
+	}
 	if s.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
 		logCtx.WithField("resource_version", new.ResourceVersion).Debugf("Resource version has already been seen")
 		return
@@ -79,7 +87,7 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 		return
 	}
 	mode := s.agentMode(outbound.Namespace)
-	if mode != types.AgentModeManaged {
+	if !mode.IsManaged() {
 		logCtx.Tracef("Discarding event for unmanaged agent")
 		return
 	}
