@@ -235,8 +235,9 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 	updated, err = m.update(ctx, true, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
-		existing.DeletionTimestamp = incoming.DeletionTimestamp
-		existing.DeletionGracePeriodSeconds = incoming.DeletionGracePeriodSeconds
+		existing.ObjectMeta.DeletionTimestamp = incoming.DeletionTimestamp
+		existing.ObjectMeta.DeletionGracePeriodSeconds = incoming.DeletionGracePeriodSeconds
+		existing.ObjectMeta.Finalizers = incoming.Finalizers
 		existing.Spec = incoming.Spec
 		existing.Status = *incoming.Status.DeepCopy()
 		existing.Operation = nil
@@ -248,6 +249,7 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 				Annotations:                incoming.Annotations,
 				DeletionTimestamp:          incoming.DeletionTimestamp,
 				DeletionGracePeriodSeconds: incoming.DeletionGracePeriodSeconds,
+				Finalizers:                 incoming.Finalizers,
 			},
 			Spec:   incoming.Spec,
 			Status: incoming.Status,
@@ -256,6 +258,7 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 			ObjectMeta: v1.ObjectMeta{
 				DeletionTimestamp:          existing.DeletionTimestamp,
 				DeletionGracePeriodSeconds: existing.DeletionGracePeriodSeconds,
+				Finalizers:                 existing.Finalizers,
 			},
 			Spec:   existing.Spec,
 			Status: existing.Status,

@@ -53,9 +53,10 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		var err error
 		new, err = s.appManager.RemoveFinalizers(s.ctx, new)
 		if err != nil {
-			logCtx.Warnf("Could not remove finalizer")
+			logCtx.WithError(err).Warnf("Could not remove finalizer")
+		} else {
+			logCtx.Debug("Removed finalizer")
 		}
-
 	}
 	if s.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
 		logCtx.WithField("resource_version", new.ResourceVersion).Debugf("Resource version has already been seen")
