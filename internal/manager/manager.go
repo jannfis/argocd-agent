@@ -20,18 +20,22 @@ type Manager interface {
 	SetMode(role ManagerRole)
 }
 
+// IsPrincipal returns true if the manager role is principal
 func (r ManagerRole) IsPrincipal() bool {
 	return r == ManagerRolePrincipal
 }
 
+// IsAgent returns true if the manager role is agent
 func (r ManagerRole) IsAgent() bool {
 	return r == ManagerRoleAgent
 }
 
+// IsAutonomous returns true if the manager mode is autonomous
 func (m ManagerMode) IsAutonomous() bool {
 	return m == ManagerModeAutonomous
 }
 
+// IsManaged returns true if the manager mode is managed mode
 func (m ManagerMode) IsManaged() bool {
 	return m == ManagerModeManaged
 }

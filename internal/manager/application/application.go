@@ -154,7 +154,6 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
 		existing.ObjectMeta.Finalizers = incoming.ObjectMeta.Finalizers
-		existing.DeletionTimestamp = incoming.DeletionTimestamp
 		existing.Spec = *incoming.Spec.DeepCopy()
 		existing.Operation = incoming.Operation.DeepCopy()
 		existing.Status = *incoming.Status.DeepCopy()
@@ -168,10 +167,9 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		}
 		target := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
-				Annotations:       incoming.Annotations,
-				Labels:            incoming.Labels,
-				DeletionTimestamp: incoming.DeletionTimestamp,
-				Finalizers:        incoming.Finalizers,
+				Annotations: incoming.Annotations,
+				Labels:      incoming.Labels,
+				Finalizers:  incoming.Finalizers,
 			},
 			Spec:      incoming.Spec,
 			Operation: incoming.Operation,
